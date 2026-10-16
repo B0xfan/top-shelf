@@ -17,12 +17,19 @@ final class ShelfModel {
     let music: NowPlaying
     let calendar: CalendarService
     let weather: WeatherService
+    let files: FilesTray
+    let clipboard: ClipboardHistory
+    let agents: Agents
 
     /// `live` starts the system services; the self-test and pictures use a quiet model.
     init(live: Bool = false) {
         music = NowPlaying(resources: live ? Bundle.main.resourceURL : nil)
         calendar = CalendarService(live: live)
         weather = WeatherService(live: live)
+        let dir = live ? supportFolder() : nil
+        files = FilesTray(store: dir?.appendingPathComponent("files.json"))
+        clipboard = ClipboardHistory(dir: dir, live: live)
+        agents = Agents(dir: dir, live: live)
     }
 
     func open(_ p: Page, byHover: Bool = false) { page = p; openedByHover = byHover; isOpen = true }
@@ -30,7 +37,7 @@ final class ShelfModel {
     func toggle(_ p: Page) { if isOpen && page == p { close() } else { open(p) } }
 
     /// Activity shown beside the notch while the shelf is closed (filled in by the services).
-    var hasBanners: Bool { (music.isPlaying && music.hasTrack) || calendar.soon != nil }
+    var hasBanners: Bool { (music.isPlaying && music.hasTrack) || calendar.soon != nil || agents.needsAttention }
 
     static let openWidth: CGFloat = 680
     static let bodyHeight: CGFloat = 204   // page area plus page dots, as in the mockup (236 total with a 32 pt notch)

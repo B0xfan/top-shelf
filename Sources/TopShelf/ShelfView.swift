@@ -15,6 +15,7 @@ enum Look {
 struct ShelfView: View {
     @Bindable var model: ShelfModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dropTargeted = false
 
     var body: some View {
         let size = model.isOpen ? model.openSize : model.collapsedSize
@@ -30,6 +31,12 @@ struct ShelfView: View {
         .background(Color.black)
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: model.isOpen ? 22 : 10, bottomTrailingRadius: model.isOpen ? 22 : 10))
         .foregroundStyle(.white)
+        // Files dragged onto the notch open the Files page and stay on the shelf.
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            loadFileURLs(providers) { model.files.add($0); model.open(.files) }
+            return true
+        }
+        .onChange(of: dropTargeted) { _, over in if over && !model.isOpen { model.open(.files) } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(reduceMotion ? nil : .spring(duration: 0.3), value: model.isOpen)
         .environment(\.colorScheme, .dark)
@@ -64,21 +71,24 @@ struct ShelfView: View {
     }
 
     @ViewBuilder private var rightBanner: some View {
-        if let e = model.calendar.soon {
-            HStack(spacing: 4) {
+        HStack(spacing: 6) {
+            if let e = model.calendar.soon {
                 Text(e.title).lineLimit(1)
-                Text(e.start.formatted(date: .omitted, time: .shortened)).fixedSize()
+                Text(e.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute())).fixedSize()
             }
-            .font(Look.small)
+            if model.agents.needsAttention {
+                Circle().fill(Look.orange).frame(width: 8, height: 8).accessibilityLabel("A Claude Code session needs you")
+            }
         }
+        .font(Look.small)
     }
 
     @ViewBuilder private var page: some View {
         switch model.page {
         case .tray: TrayPage(model: model)
-        case .files: Text("Files").font(Look.small).foregroundStyle(Look.dim)
-        case .clipboard: Text("Clipboard").font(Look.small).foregroundStyle(Look.dim)
-        case .agents: Text("Agents").font(Look.small).foregroundStyle(Look.dim)
+        case .files: FilesPage(model: model)
+        case .clipboard: ClipboardPage(model: model)
+        case .agents: AgentsPage(model: model)
         }
     }
 

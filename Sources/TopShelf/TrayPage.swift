@@ -50,12 +50,12 @@ struct MusicCard: View {
                 Text(music.artist ?? (music.available ? "" : "This version of macOS blocks them"))
                     .font(Look.small).foregroundStyle(Look.dim).lineLimit(1)
                 HStack(spacing: 14) {
-                    control("backward.fill", "Previous track") { music.send(.previous) }
+                    control("backward.end.fill", "Previous track") { music.send(.previous) }
                     control(music.isPlaying ? "pause.fill" : "play.fill", music.isPlaying ? "Pause" : "Play") { music.send(.toggle) }
-                    control("forward.fill", "Next track") { music.send(.next) }
+                    control("forward.end.fill", "Next track") { music.send(.next) }
                 }
                 .padding(.top, 6)
-                .disabled(!music.available)
+                .disabled(!music.available || !music.hasTrack)   // a play with no player loaded makes macOS open Apple Music
             }
         }
     }

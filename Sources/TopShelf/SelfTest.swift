@@ -27,7 +27,7 @@ enum SelfTest {
         return false
     }
 
-    static var tests: [() -> Void] = [shelfTests, musicTests, calendarWeatherTests]
+    static var tests: [() -> Void] = [shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
 
     static func shelfTests() {
         let g = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 37)
@@ -91,6 +91,182 @@ extension SelfTest {
     }
 }
 
+extension SelfTest {
+    static func tempDir() -> URL {
+        let d = FileManager.default.temporaryDirectory.appendingPathComponent("topshelf-test-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    /// Lets main-queue work (listener, text recognition) run, up to `seconds`, until `done` is true.
+    static func wait(_ seconds: Double, until done: () -> Bool) {
+        let end = Date().addingTimeInterval(seconds)
+        while !done() && Date() < end {
+            _ = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { _ in }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+    }
+
+    static func filesTests() {
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let urls = (1...8).map { d.appendingPathComponent("f\($0).txt") }
+        for u in urls { FileManager.default.createFile(atPath: u.path, contents: Data("x".utf8)) }
+        let store = d.appendingPathComponent("files.json")
+        let t = FilesTray(store: store)
+        let refused = t.add(Array(urls.prefix(7)))
+        check("files: six fit, the seventh is refused", t.items.count == 6 && refused == 1)
+        t.add([urls[0]])
+        check("files: adding a file again moves it to the front, no duplicate", t.items.count == 6 && t.items.first?.path == urls[0].path)
+        t.remove(t.items[0])
+        check("files: removed after a drag out", t.items.count == 5 && !t.items.contains { $0.path == urls[0].path })
+        check("files: the tray survives a restart", FilesTray(store: store).items.count == 5)
+        check("files: saved for John's account only", (try? FileManager.default.attributesOfItem(atPath: store.path)[.posixPermissions] as? Int) == 0o600)
+        try? FileManager.default.removeItem(at: urls[1])
+        t.prune(now: Date())
+        check("files: a deleted file leaves the tray", !t.items.contains { $0.path == urls[1].path })
+        t.prune(now: Date().addingTimeInterval(FilesTray.keepFor + 1))
+        check("files: everything expires after a day", t.items.isEmpty)
+    }
+
+    static func clipboardTests() {
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let pb = NSPasteboard(name: NSPasteboard.Name("TopShelfTest-\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        let h = ClipboardHistory(dir: d, live: false)
+        func copy(_ fill: () -> Void) { pb.clearContents(); fill(); h.poll(pb) }
+
+        copy { pb.setString("hello", forType: .string) }
+        copy { pb.setString("hello", forType: .string) }
+        check("clipboard: a repeat is merged with a count", h.clips.count == 1 && h.clips[0].count == 2 && h.clips[0].kind == .text)
+        copy { pb.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil); pb.setString("secret", forType: .string) }
+        check("clipboard: password-manager copies are never kept", !h.clips.contains { $0.text == "secret" })
+        copy { pb.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.TransientType")], owner: nil); pb.setString("temp", forType: .string) }
+        check("clipboard: temporary copies are skipped", !h.clips.contains { $0.text == "temp" })
+        copy { pb.setData(Data("{\\rtf1 bold}".utf8), forType: .rtf); pb.setString("bold", forType: .string) }
+        check("clipboard: rich text keeps its formatting", h.clips[0].kind == .rich && h.clips[0].rtf != nil)
+        copy { pb.writeObjects([URL(fileURLWithPath: "/tmp/Report.pdf") as NSURL]) }
+        check("clipboard: copied files are kept as references", h.clips[0].kind == .files && h.clips[0].text == "Report.pdf")
+
+        let img = NSImage(size: NSSize(width: 600, height: 120), flipped: false) { r in
+            NSColor.white.setFill(); r.fill()
+            ("INVOICE NUMBER 4471" as NSString).draw(at: NSPoint(x: 20, y: 40), withAttributes: [.font: NSFont.systemFont(ofSize: 40), .foregroundColor: NSColor.black])
+            return true
+        }
+        copy { pb.writeObjects([img]) }
+        check("clipboard: a picture is stored", h.clips[0].kind == .image && h.image(h.clips[0]) != nil)
+        wait(20) { h.clips.contains { $0.text.contains("4471") } }
+        h.query = "invoice"
+        check("clipboard: words inside a picture can be searched", h.visible.first?.kind == .image)
+        h.query = ""
+
+        let hello = h.clips.first { $0.text == "hello" }!
+        h.togglePin(hello)
+        check("clipboard: pinned clips come first", h.visible.first?.text == "hello")
+        h.copy(hello, to: pb); h.poll(pb)
+        check("clipboard: copying back puts it on the clipboard", pb.string(forType: .string) == "hello")
+        check("clipboard: the history survives a restart", ClipboardHistory(dir: d, live: false).clips.count == h.clips.count)
+        let picture = h.clips.first { $0.kind == .image }!.imageFile!
+        h.prune(now: Date().addingTimeInterval(ClipboardHistory.keepFor + 1))
+        check("clipboard: after a week only pinned clips stay", h.clips.map(\.text) == ["hello"])
+        check("clipboard: an expired picture is deleted from disk",
+              !FileManager.default.fileExists(atPath: d.appendingPathComponent("clipboard-images/" + picture).path))
+        for i in 0..<(ClipboardHistory.maxClips + 5) { h.add(.init(kind: .text, text: "n\(i)", key: "k\(i)", last: Date())) }
+        check("clipboard: at most 200 unpinned clips plus pinned ones", h.clips.count == ClipboardHistory.maxClips + 1)
+    }
+
+    static func post(_ a: Agents, _ json: String, token: String? = nil, path: String = "/event") -> Int {
+        let body = Data(json.utf8)
+        let raw = "POST \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Top-Shelf-Token: \(token ?? a.token)\r\nContent-Length: \(body.count)\r\n\r\n"
+        guard case .complete(let req) = Agents.parse(Data(raw.utf8) + body) else { return -1 }
+        return a.handle(req, now: Date())
+    }
+
+    static func agentsTests() {
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let a = Agents(dir: d, live: false)
+        check("agents: a 64-character secret is made on first run", a.token.count == 64)
+        check("agents: the secret file is for John's account only",
+              (try? FileManager.default.attributesOfItem(atPath: d.appendingPathComponent("agent-header").path)[.posixPermissions] as? Int) == 0o600)
+        check("agents: the same secret after a restart", Agents(dir: d, live: false).token == a.token)
+        check("agents: a fresh install gets a different secret", Agents(dir: tempDir(), live: false).token != a.token)
+
+        check("agents: a wrong secret is refused", post(a, #"{"session_id":"s1","hook_event_name":"Stop"}"#, token: String(repeating: "0", count: 64)) == 401)
+        check("agents: other paths are refused", post(a, "{}", path: "/other") == 404)
+        check("agents: junk is refused", post(a, "not json") == 400)
+        check("agents: nothing was recorded from refused posts", a.sessions.isEmpty && a.lastSignal == nil)
+
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"UserPromptSubmit","cwd":"/Users/x/sample-project"}"#)
+        check("agents: a prompt marks the session working", a.sessions.first?.state == .working && a.sessions.first?.name == "sample-project" && a.lastSignal != nil)
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Edit","cwd":"/Users/x/sample-project"}"#)
+        check("agents: tool use says what it is doing", a.sessions.first?.detail == "Claude Code, editing files")
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash","cwd":"/Users/x/sample-project"}"#)
+        check("agents: a permission prompt needs attention", a.needsAttention && a.sessions.count == 1)
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"Notification","notification_type":"auth_success","cwd":"/x"}"#)
+        check("agents: unrelated notices change nothing", a.needsAttention)
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"/Users/x/sample-project"}"#)
+        check("agents: once approved it is working again", a.sessions.first?.state == .working && !a.needsAttention)
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"Stop","cwd":"/Users/x/sample-project"}"#)
+        check("agents: stop means idle", a.sessions.first?.state == .idle)
+        _ = post(a, #"{"session_id":"s1","hook_event_name":"SessionEnd"}"#)
+        check("agents: an ended session leaves the list", a.sessions.isEmpty)
+        _ = post(a, #"{"session_id":"s2","hook_event_name":"Stop","cwd":"/x/y"}"#)
+        a.prune(now: Date().addingTimeInterval(3601))
+        check("agents: quiet sessions leave after an hour", a.sessions.isEmpty)
+
+        check("agents: a partial request waits for the rest", { if case .incomplete = Agents.parse(Data("POST /event HTTP/1.1\r\nContent-Length: 10\r\n\r\n{}".utf8)) { return true }; return false }())
+        check("agents: an oversized request is refused", { if case .bad = Agents.parse(Data("POST /event HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n".utf8)) { return true }; return false }())
+        check("agents: secrets compare correctly", Agents.same("abc", "abc") && !Agents.same("abc", "abd") && !Agents.same("abc", "ab"))
+
+        // One-click install, on a copy in a temporary folder (never the real ~/.claude).
+        let settings = d.appendingPathComponent("claude/settings.json")
+        try? FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = #"{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}"#
+        try! Data(original.utf8).write(to: settings)
+        let backup = try? Agents.installHooks(settings: settings)
+        let after = (try? JSONSerialization.jsonObject(with: Data(contentsOf: settings))) as? [String: Any]
+        let hooks = after?["hooks"] as? [String: Any]
+        check("install: a backup of the old settings is made first", backup.flatMap { try? String(contentsOf: $0, encoding: .utf8) } == original)
+        check("install: John's own settings and hooks are kept", after?["model"] as? String == "opus" && (hooks?["Stop"] as? [Any])?.count == 2)
+        check("install: all five events are connected", Agents.events.allSatisfy { (hooks?[$0] as? [Any])?.isEmpty == false })
+        check("install: shows as installed", Agents.hooksInstalled(settings: settings))
+        check("install: the secret is not in Claude's settings", !((try? String(contentsOf: settings, encoding: .utf8)) ?? "").contains(a.token))
+        Thread.sleep(forTimeInterval: 1.1)   // backups are named by the second
+        _ = try? Agents.installHooks(settings: settings)
+        let again = (try? JSONSerialization.jsonObject(with: Data(contentsOf: settings))) as? [String: Any]
+        check("install: a second click adds nothing twice", ((again?["hooks"] as? [String: Any])?["Stop"] as? [Any])?.count == 2)
+        let broken = d.appendingPathComponent("broken/settings.json")
+        try? FileManager.default.createDirectory(at: broken.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! Data("{ not json".utf8).write(to: broken)
+        check("install: an unreadable settings file is left untouched",
+              (try? Agents.installHooks(settings: broken)) == nil && (try? String(contentsOf: broken, encoding: .utf8)) == "{ not json")
+        let fresh = d.appendingPathComponent("none/settings.json")
+        check("install: works when Claude Code has no settings file yet", (try? Agents.installHooks(settings: fresh)) != nil && Agents.hooksInstalled(settings: fresh))
+    }
+
+    /// The real listener on 127.0.0.1:7823 with the real hook command (curl), on the build machine.
+    static func listenerTest() {
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let a = Agents(dir: d, live: true)
+        wait(1) { false }
+        func curl(_ header: String) -> Int32 {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "printf '%s' '{\"session_id\":\"live\",\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"/tmp/live-check\"}' | curl -s -m 2 -o /dev/null -w '%{http_code}' -H @\"$H\" --data-binary @- http://127.0.0.1:7823/event > \"$OUT\""]
+            let out = d.appendingPathComponent("code-\(UUID().uuidString)")
+            p.environment = ["H": header, "OUT": out.path, "PATH": "/usr/bin:/bin"]
+            try? p.run()
+            wait(5) { !p.isRunning }
+            return Int32((try? String(contentsOf: out, encoding: .utf8)) ?? "") ?? -1
+        }
+        let good = d.appendingPathComponent("agent-header").path
+        let badFile = d.appendingPathComponent("bad-header")
+        try! Data("X-Top-Shelf-Token: \(String(repeating: "f", count: 64))\n".utf8).write(to: badFile)
+        check("listener: a hook with a wrong secret gets 401", curl(badFile.path) == 401 && a.sessions.isEmpty)
+        check("listener: the real hook command is accepted", curl(good) == 200)
+        check("listener: and the session shows as working", a.sessions.first?.name == "live-check" && a.sessions.first?.state == .working)
+    }
+}
+
 enum Shots {
     static func draw(into dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -134,6 +310,18 @@ enum Sample {
         model.weather.temperature = Measurement(value: 24, unit: .celsius)
         model.weather.code = 2
         model.weather.place = "Sample City"
+
+        let d = SelfTest.tempDir()
+        let files = ["Proposal.pdf", "Photo-01.png", "Budget.xlsx"].map { d.appendingPathComponent($0) }
+        for f in files { FileManager.default.createFile(atPath: f.path, contents: Data()) }
+        model.files.add(files.reversed())
+        let now = Date()
+        for (i, t) in ["Meeting notes draft for Friday", "https://example.com/sample-link", "https://example.com/sample-link", "Pinned: sample email signature text"].enumerated() {
+            model.clipboard.add(.init(kind: .text, text: t, key: t, last: now.addingTimeInterval(Double(i))))
+        }
+        model.clipboard.togglePin(model.clipboard.clips[0])
+        _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude Code, asking permission to run a command","cwd":"/x/sample-website"}"#)
+        _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"PostToolUse","tool_name":"Edit","cwd":"/x/sample-project"}"#)
     }
 }
 #endif

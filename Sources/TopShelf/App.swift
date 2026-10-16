@@ -21,12 +21,14 @@ enum Main {
 func musicCheck(_ commands: ArraySlice<String>) -> Never {
     let music = NowPlaying(resources: Bundle.main.resourceURL)
     func report(_ label: String) {
-        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        let until = Date().addingTimeInterval(2.5)
+        _ = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { _ in }   // without a timer the run loop returns at once
+        RunLoop.main.run(until: until)
         print("\(label): available=\(music.available) player=\(music.playerID ?? "-") title=\(music.title ?? "-") playing=\(music.isPlaying) artwork=\(music.artwork != nil)")
     }
     report("start")
     let names: [String: NowPlaying.Command] = ["play": .play, "pause": .pause, "next": .next, "previous": .previous]
-    for c in commands { if let cmd = names[c] { music.send(cmd); report(c) } }
+    for c in commands { if let cmd = names[c], music.hasTrack { music.send(cmd); report(c) } }
     exit(music.available ? 0 : 1)
 }
 

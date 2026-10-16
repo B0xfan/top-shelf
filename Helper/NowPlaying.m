@@ -15,6 +15,11 @@ static void *mr(const char *name) {
     return h ? dlsym(h, name) : NULL;
 }
 
+static void readCommands(void);
+// Commands wait for the first answer: a "play" sent before the current player is known makes macOS open Apple Music.
+// A 3-second fallback still starts the reader, so the helper always notices when Top Shelf quits.
+static void startCommandsOnce(void) { static dispatch_once_t once; dispatch_once(&once, ^{ readCommands(); }); }
+
 static void emit(void) {
     dispatch_queue_t q = dispatch_get_main_queue();
     ((GetClientFn)mr("MRMediaRemoteGetNowPlayingClient"))(q, ^(id client) {
@@ -32,6 +37,7 @@ static void emit(void) {
                 if ([art isKindOfClass:NSData.class] && art.length < 2000000) o[@"art"] = [art base64EncodedStringWithOptions:0];
                 NSData *json = [NSJSONSerialization dataWithJSONObject:o options:0 error:nil];
                 if (json) { fwrite(json.bytes, 1, json.length, stdout); fputc('\n', stdout); fflush(stdout); }
+                startCommandsOnce();
             });
         });
     });
@@ -48,6 +54,11 @@ void ts_stream(void) {
                           @"kMRMediaRemoteNowPlayingApplicationDidChangeNotification"])
         [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:nil usingBlock:^(NSNotification *note) { emit(); }];
     emit();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ startCommandsOnce(); });
+    CFRunLoopRun();
+}
+
+static void readCommands(void) {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         char line[32];
         while (fgets(line, sizeof line, stdin)) {
@@ -57,5 +68,4 @@ void ts_stream(void) {
         }
         exit(0);
     });
-    CFRunLoopRun();
 }
