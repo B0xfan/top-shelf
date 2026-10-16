@@ -132,8 +132,7 @@ extension SelfTest {
         m.open(.tray)
         wait(0.6) { !m.isOpen }
         check("settings: a close pending from before does not shut the next opening", m.isOpen)
-        m.close(); hover.closed(); hover.moved(inNotch: false); m.openMode = .both
-        m.openMode = .both
+        m.close(); hover.closed(); m.openMode = .both; hover.moved(inNotch: false)   // re-arm in a mode where hover counts
         hover.moved(inNotch: true)
         wait(0.05) { m.isOpen }
         let openedEarly = m.isOpen
