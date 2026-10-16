@@ -49,15 +49,15 @@ enum SelfTest {
         func agentPost(_ json: String) { _ = SelfTest.post(m.agents, json) }
         agentPost(#"{"session_id":"w","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#)
         check("closed: a working session shows, with no music or meeting", m.hasBanners && m.agents.activeState == .working && m.agents.activeCount == 1)
-        check("closed: Bartender's width, 37.5 pt a side plus a 3 pt flare (260 pt with a 179 pt notch)",
-              m.collapsedSize.width == m.geometry.notchWidth + 81)
+        check("closed: Bartender's width, 37.5 pt a side plus a 4.5 pt flare (263 pt with a 179 pt notch)",
+              m.collapsedSize.width == m.geometry.notchWidth + 84)
         agentPost(#"{"session_id":"n","hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/x/q"}"#)
         check("closed: waiting for John wins over working, and both count", m.agents.activeState == .attention && m.agents.activeCount == 2)
         agentPost(#"{"session_id":"n","hook_event_name":"Stop","cwd":"/x/q"}"#)
         agentPost(#"{"session_id":"w","hook_event_name":"Stop","cwd":"/x/p"}"#)
         check("closed: idle sessions do not count", m.agents.activeCount == 0 && !m.hasBanners)
         m.music.apply(["title": "Song", "playing": true])
-        check("closed: music alone shows, same width", m.hasBanners && m.collapsedSize.width == m.geometry.notchWidth + 81)
+        check("closed: music alone shows, same width", m.hasBanners && m.collapsedSize.width == m.geometry.notchWidth + 84)
         m.hoverDelay = 0.8
         check("hover delay is remembered", UserDefaults.standard.double(forKey: "hoverDelay") == 0.8)
     }

@@ -46,7 +46,7 @@ final class ShelfModel {
     /// closed with activity it is 254 pt wide around a 179 pt notch (37.5 pt a side), the top flaring out 3 pt;
     /// open it is 611 x 174 pt.
     static let side: CGFloat = 37.5
-    static let flare: CGFloat = 3
+    static let flare: CGFloat = 4.5
     var collapsedSize: CGSize {
         CGSize(width: geometry.notchWidth + (hasBanners ? 2 * (Self.side + Self.flare) : 0), height: geometry.notchHeight)
     }

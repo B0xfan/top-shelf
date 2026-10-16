@@ -51,7 +51,7 @@ struct ShelfView: View {
         }
         .frame(width: size.width, height: size.height, alignment: .top)
         .background(Color.black)
-        .clipShape(NotchShape(flare: model.isOpen ? 0 : closedFlare, radius: model.isOpen ? 25 : (model.hasBanners ? 14 : 10)))
+        .clipShape(NotchShape(flare: model.isOpen ? 0 : closedFlare, radius: model.isOpen ? 25 : (model.hasBanners ? 13 : 10)))
         .foregroundStyle(.white)
         // Files dragged onto the notch open the Files page and stay on the shelf.
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
@@ -96,7 +96,7 @@ struct ShelfView: View {
     @ViewBuilder private var rightItem: some View {
         if model.agents.activeState != nil {
             Text("\(model.agents.activeCount)")
-                .font(.system(size: 12, weight: .bold)).foregroundStyle(Look.orange).fixedSize()
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(Look.orange).fixedSize()
                 .accessibilityLabel("\(model.agents.activeCount) Claude Code sessions busy")
         } else if model.showsMusic {
             PlayingBars(animate: !reduceMotion).accessibilityHidden(true)
