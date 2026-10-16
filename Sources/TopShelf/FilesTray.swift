@@ -144,9 +144,11 @@ struct FilesPage: View {
                     LazyVGrid(columns: columns, spacing: 10) {
                         ForEach(tray.items) { item in tile(item) }
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                airDrop.frame(width: 130)
+                airDrop.frame(width: 130).frame(maxHeight: .infinity)
             }
+            .fixedSize(horizontal: false, vertical: true)   // AirDrop is as tall as the tiles beside it
             Text("\(tray.items.count) of \(FilesTray.limit) files. Files leave the tray only after a successful drag out.")
                 .font(Look.small).foregroundStyle(Look.dim)
         }
@@ -172,7 +174,7 @@ struct FilesPage: View {
             Text("drop to send").font(Look.small)
         }
         .foregroundStyle(Look.dim)
-        .frame(maxWidth: .infinity, maxHeight: 140)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(airDropTargeted ? Look.faint : .clear, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Look.dim, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
         .onDrop(of: [.fileURL], isTargeted: $airDropTargeted) { providers in
