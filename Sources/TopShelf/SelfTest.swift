@@ -100,8 +100,12 @@ extension SelfTest {
 extension SelfTest {
     static func settingsTests() {
         let m = ShelfModel()
-        check("settings: defaults are Both, 0.3 s, 0.5 s, 1 day, 1 week",
-              m.openMode == .both && m.hoverDelay == 0.3 && m.hoverCloseDelay == 0.5 && m.keepFilesFor == 86400 && m.keepClipsFor == 604800)
+        check("settings: defaults are Both, 0.3 s, 0.5 s, 1 day, 1 week, menu bar icon on",
+              m.openMode == .both && m.hoverDelay == 0.3 && m.hoverCloseDelay == 0.5 && m.keepFilesFor == 86400 && m.keepClipsFor == 604800 && m.showMenuBarIcon)
+        var iconCalls = 0
+        m.menuBarIconChanged = { iconCalls += 1 }
+        m.showMenuBarIcon = false
+        check("settings: turning the menu bar icon off applies at once and is kept", iconCalls == 1 && !ShelfModel().showMenuBarIcon)
         m.openMode = .click; m.hoverDelay = 0.2; m.hoverCloseDelay = 0.3; m.keepFilesFor = 3600; m.keepClipsFor = 86400
         let again = ShelfModel()
         check("settings: kept after a relaunch", again.openMode == .click && again.hoverDelay == 0.2 && again.hoverCloseDelay == 0.3
@@ -269,17 +273,26 @@ extension SelfTest {
         _ = post(a, #"{"session_id":"m","hook_event_name":"UserPromptSubmit","cwd":"/x/main-project"}"#)
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStart","agent_id":"a1","agent_type":"Explore","cwd":"/x/main-project"}"#)
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStart","agent_id":"a2","agent_type":"general-purpose","cwd":"/x/main-project"}"#)
-        check("subagents: a session plus two subagents counts 3", a.activeCount == 3)
+        check("subagents: a session waiting on two subagents counts 2, not 3", a.activeCount == 2 && a.sessions.first { $0.id == "m" }?.state == .idle)
         check("subagents: listed under their session", a.ordered.map(\.id) == ["m", "a2", "a1"] && a.ordered[1].parent == "m")
         _ = post(a, #"{"session_id":"m","hook_event_name":"PostToolUse","agent_id":"a1","agent_type":"Explore","tool_name":"Grep","cwd":"/x/main-project"}"#)
-        check("subagents: their tool use updates their own row", a.sessions.first { $0.id == "a1" }?.detail == "Explore, reading files"
-              && a.sessions.first { $0.id == "m" }?.detail == "Claude Code, working")
+        check("subagents: their tool use updates their own row, not the session's", a.sessions.first { $0.id == "a1" }?.detail == "Explore, reading files"
+              && a.sessions.first { $0.id == "m" }?.state == .idle && a.activeCount == 2)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"PostToolUse","tool_name":"Read","cwd":"/x/main-project"}"#)
+        check("subagents: the session working itself alongside counts again", a.activeCount == 3)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"Stop","cwd":"/x/main-project"}"#)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"PostToolUse","agent_id":"a2","agent_type":"general-purpose","tool_name":"Bash","cwd":"/x/main-project"}"#)
+        check("subagents: an idle chat counts only its working subagents (the reported bug)", a.activeCount == 2
+              && a.sessions.first { $0.id == "m" }?.state == .idle)
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"a1","agent_type":"Explore"}"#)
-        check("subagents: a finished one leaves", a.activeCount == 2 && !a.sessions.contains { $0.id == "a1" })
+        check("subagents: a finished one leaves", a.activeCount == 1 && !a.sessions.contains { $0.id == "a1" })
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"","agent_type":""}"#)
-        check("subagents: Claude's own helpers stopping change nothing", a.activeCount == 2)
+        check("subagents: Claude's own helpers stopping change nothing", a.activeCount == 1)
         _ = post(a, #"{"session_id":"z","hook_event_name":"SubagentStart","agent_id":"z1","agent_type":"Plan","cwd":"/x/other"}"#)
-        check("subagents: an unseen session appears as working", a.sessions.first { $0.id == "z" }?.state == .working && a.activeCount == 4)
+        check("subagents: an unseen session appears, waiting", a.sessions.first { $0.id == "z" }?.state == .idle && a.activeCount == 2)
+        let tmp = NSTemporaryDirectory() + "remember-summarizer-cwd-abc"
+        _ = post(a, "{\"session_id\":\"h\",\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"\(tmp)\"}")
+        check("agents: helper sessions in the temporary folder are not counted", !a.sessions.contains { $0.id == "h" } && a.activeCount == 2)
         _ = post(a, #"{"session_id":"m","hook_event_name":"SessionEnd"}"#)
         check("subagents: leave with their session", !a.sessions.contains { $0.id == "a2" || $0.id == "m" })
         _ = post(a, #"{"session_id":"z","hook_event_name":"SessionEnd"}"#)
@@ -376,7 +389,7 @@ enum Shots {
             shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
                  to: dir.appendingPathComponent("\(name).png"))
         }
-        shot(SettingsView(model: model), size: CGSize(width: 560, height: 560), to: dir.appendingPathComponent("settings.png"))
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 660), to: dir.appendingPathComponent("settings.png"))
         // closed with only music playing
         _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SessionEnd"}"#)
         _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"SessionEnd"}"#)

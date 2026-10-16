@@ -15,6 +15,10 @@ struct SettingsView: View {
                 delay("Hover open delay", "Pointer waits on the notch before it opens", $model.hoverDelay, upTo: 1.5)
                 delay("Hover close delay", "Time after the pointer leaves before it closes", $model.hoverCloseDelay, upTo: 3)
             }
+            Section("Menu bar") {
+                Toggle("Show menu bar icon", isOn: $model.showMenuBarIcon)
+                    .toggleStyle(.switch)
+            }
             Section("Keeping things") {
                 Picker("Keep dropped files for", selection: $model.keepFilesFor) {
                     Text("1 hour").tag(3600.0); Text("1 day").tag(86400.0); Text("1 week").tag(604800.0); Text("Until removed").tag(0.0)

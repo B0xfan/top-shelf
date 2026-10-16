@@ -52,6 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: "Top Shelf")
         statusItem.menu = makeMenu()
+        statusItem.isVisible = model.showMenuBarIcon
+        model.menuBarIconChanged = { [weak self] in self.map { $0.statusItem.isVisible = $0.model.showMenuBarIcon } }
         model.openSettings = { [weak self] in self.map { SettingsWindow.show($0.model) } }
     }
 

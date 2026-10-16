@@ -133,8 +133,11 @@ final class Agents {
     }
 
     /// Main sessions and their subagents. Events from inside a subagent carry its `agent_id`; the subagent gets its own
-    /// row under its session, and a session with a running subagent counts as busy too.
+    /// row under its session. A session counts as busy only for its own work: handing a job to a subagent leaves it
+    /// waiting (not counted) until it does something itself again, so one subagent at work reads 1, not 2.
     private func apply(id: String, event: String, json: [String: Any], now: Date) {
+        // Helper sessions run by plugins (the remember plugin's summarizer) work in the system temporary folder; not John's chats.
+        if let cwd = json["cwd"] as? String, Self.isHelperFolder(cwd) { return }
         let agent = (json["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let kind = (json["agent_type"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent"
         switch event {
@@ -162,11 +165,11 @@ final class Agents {
         let name = agent == nil ? (json["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Claude Code" : kind
         upsert(Session(id: agent ?? id, parent: agent == nil ? nil : id, name: name, state: update.0, detail: detail, updated: now))
         if agent != nil, let i = sessions.firstIndex(where: { $0.id == id }) {
-            if sessions[i].state == .idle { sessions[i].state = .working; sessions[i].detail = "Claude Code, waiting on a subagent" }
-            sessions[i].updated = now
+            if event == "SubagentStart", sessions[i].state == .working { sessions[i].state = .idle; sessions[i].detail = "Claude Code, waiting on a subagent" }
+            sessions[i].updated = now   // keeps the session (and so its subagents) from being pruned as quiet
         } else if agent != nil {
             let cwdName = (json["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Claude Code"
-            upsert(Session(id: id, parent: nil, name: cwdName, state: .working, detail: "Claude Code, waiting on a subagent", updated: now))
+            upsert(Session(id: id, parent: nil, name: cwdName, state: .idle, detail: "Claude Code, waiting on a subagent", updated: now))
         }
         prune(now: now)
     }
@@ -184,6 +187,11 @@ final class Agents {
     /// Sessions and subagents that are working or waiting for John: the number beside the notch.
     var activeCount: Int { sessions.filter { $0.state != .idle }.count }
 
+
+    static func isHelperFolder(_ cwd: String) -> Bool {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath().path
+        return URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path.hasPrefix(tmp)
+    }
 
     static func activity(_ tool: String?) -> String {
         switch tool {

@@ -23,6 +23,11 @@ final class ShelfModel {
     var hoverCloseDelay: Double = UserDefaults.standard.object(forKey: "hoverCloseDelay") as? Double ?? 0.5 {
         didSet { UserDefaults.standard.set(hoverCloseDelay, forKey: "hoverCloseDelay") }
     }
+    /// The Top Shelf icon in the menu bar. When off, Settings still opens from the shelf's gear button.
+    var showMenuBarIcon: Bool = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon"); menuBarIconChanged?() }
+    }
+    @ObservationIgnored var menuBarIconChanged: (() -> Void)?
     /// How long dropped files stay; 0 = until removed.
     var keepFilesFor: TimeInterval = UserDefaults.standard.object(forKey: "keepFilesFor") as? Double ?? 86400 {
         didSet { UserDefaults.standard.set(keepFilesFor, forKey: "keepFilesFor"); files.keepFor = keepFilesFor > 0 ? keepFilesFor : nil; files.prune() }
