@@ -129,7 +129,7 @@ struct FileDragSource: NSViewRepresentable {
 struct FilesPage: View {
     let model: ShelfModel
     @State private var airDropTargeted = false
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 6)   // one row of up to six, as tall as the Tray cards allow
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)   // two rows of three short tiles fit the 106 pt page
 
     var body: some View {
         let tray = model.files
@@ -155,13 +155,14 @@ struct FilesPage: View {
     }
 
     private func tile(_ item: FilesTray.Item) -> some View {
-        VStack(spacing: 4) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: item.path)).resizable().frame(width: 30, height: 30)
+        HStack(spacing: 6) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: item.path)).resizable().frame(width: 22, height: 22)
             Text(item.url.lastPathComponent).font(Look.small).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
         }
-        .padding(8)
-        .frame(maxWidth: .infinity)
-        .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity).frame(height: 34)
+        .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 10))
         .overlay(FileDragSource(url: item.url) { model.files.remove(item) })
         .accessibilityElement(children: .combine)
         .accessibilityHint("Drag out to move or copy it; click to open")

@@ -335,10 +335,11 @@ struct AgentsPage: View {
     }
 
     private func row(_ s: Agents.Session) -> some View {
-        HStack(spacing: 10) {
+        if s.parent != nil { return AnyView(subRow(s)) }
+        return AnyView(HStack(spacing: 10) {
             Circle().fill(s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 0) {
-                Text(s.name).font(s.parent == nil ? Look.title : .system(size: 12, weight: .medium)).lineLimit(1)
+                Text(s.name).font(Look.title).lineLimit(1)
                 Text(s.detail).font(Look.small).foregroundStyle(Look.dim).lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -349,7 +350,19 @@ struct AgentsPage: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 14))
-        .padding(.leading, s.parent == nil ? 0 : 24)   // subagents sit under their session
+        .accessibilityElement(children: .combine))
+    }
+
+    /// A subagent: one line under its session.
+    private func subRow(_ s: Agents.Session) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim).frame(width: 6, height: 6)
+            Text(s.detail).font(Look.small).foregroundStyle(Look.dim).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(s.state.rawValue).font(.system(size: 10)).foregroundStyle(s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim)
+        }
+        .padding(.horizontal, 12).frame(height: 24)
+        .padding(.leading, 24)
         .accessibilityElement(children: .combine)
     }
 
