@@ -1,0 +1,45 @@
+# Manual trigger only, on purpose: start a run with scripts/cloud-build.sh. No push or schedule triggers.
+name: build
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release build
+        run: swift build -c release
+      - name: Assemble the app (signed later on John's Mac by scripts/install-cloud-build.sh)
+        run: |
+          set -euo pipefail
+          APP="build/Top Shelf.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "$(swift build -c release --show-bin-path)/TopShelf" "$APP/Contents/MacOS/TopShelf"
+          cp scripts/Info.plist "$APP/Contents/Info.plist"
+          if [ -f Helper/NowPlaying.m ]; then
+            clang -dynamiclib -fobjc-arc -O2 -arch arm64 -mmacosx-version-min=14.0 -framework Foundation Helper/NowPlaying.m -o "$APP/Contents/Resources/libTopShelfNowPlaying.dylib"
+            cp Helper/nowplaying.pl "$APP/Contents/Resources/nowplaying.pl"
+          fi
+          ditto -c -k --keepParent "$APP" TopShelf.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TopShelf-app
+          path: TopShelf.zip
+          retention-days: 3
+          compression-level: 0
+      # The self-test lives in the debug build only; a failing or non-compiling self-test fails the run.
+      - name: Self-test
+        timeout-minutes: 20
+        run: |
+          swift build
+          .build/debug/TopShelf --selftest
+      - name: Pictures of every shelf state (drawn off screen)
+        timeout-minutes: 5
+        run: .build/debug/TopShelf --shots shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: shots
+          retention-days: 3
+          if-no-files-found: ignore
