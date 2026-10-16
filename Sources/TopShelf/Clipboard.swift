@@ -157,18 +157,12 @@ final class ClipboardHistory {
 }
 
 struct ClipboardPage: View {
-    let model: ShelfModel
-    @FocusState private var searchFocused: Bool
+    let model: ShelfModel   // the search field sits in the shelf's top row, right of the notch
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
 
     var body: some View {
         @Bindable var history = model.clipboard
         VStack(spacing: 8) {
-            TextField("Search clipboard", text: $history.query)
-                .textFieldStyle(.plain).font(.system(size: 12))
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Look.card, in: RoundedRectangle(cornerRadius: 10))
-                .focused($searchFocused)
             if history.visible.isEmpty {
                 Text(history.query.isEmpty ? "Things you copy show up here." : "Nothing matches.")
                     .font(Look.small).foregroundStyle(Look.dim).frame(maxWidth: .infinity, minHeight: 96)
@@ -181,7 +175,6 @@ struct ClipboardPage: View {
                 .scrollIndicators(.never)
             }
         }
-        .onAppear { searchFocused = !model.openedByHover }
     }
 
     private func tile(_ c: ClipboardHistory.Clip) -> some View {
@@ -200,14 +193,14 @@ struct ClipboardPage: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
-                .frame(maxWidth: .infinity).frame(height: 96).clipped()
+                .frame(maxWidth: .infinity).frame(height: 100).clipped()
                 Text(c.pinned ? "pinned" : c.count > 1 ? "x\(c.count)" : c.kind == .image ? "image" : "")
                     .font(.system(size: 10)).foregroundStyle(Look.dim).padding(.trailing, 6).padding(.bottom, 4)
             }
-            .background(Look.card)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(c.pinned ? Look.orange : .clear, lineWidth: 1.5))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .background(Look.cardGradient)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(c.pinned ? Look.orange : .clear, lineWidth: 1.5))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
         .contextMenu { Button(c.pinned ? "Unpin" : "Pin") { history.togglePin(c) } }

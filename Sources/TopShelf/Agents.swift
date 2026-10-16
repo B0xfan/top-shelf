@@ -11,6 +11,7 @@ final class Agents {
     enum State: String { case working = "Working", idle = "Idle", attention = "Needs attention" }
     struct Session: Identifiable, Equatable {
         var id: String
+        var parent: String?   // the main session's id when this row is a subagent
         var name: String
         var state: State
         var detail: String
@@ -18,7 +19,7 @@ final class Agents {
     }
 
     static let port: UInt16 = 7823
-    static let events = ["UserPromptSubmit", "PostToolUse", "Stop", "Notification", "SessionEnd"]
+    static let events = ["UserPromptSubmit", "PostToolUse", "Stop", "Notification", "SessionEnd", "SubagentStart", "SubagentStop"]
     private(set) var sessions: [Session] = []
     private(set) var lastSignal: Date?
     private(set) var listenerProblem: String?
@@ -131,29 +132,58 @@ final class Agents {
         return 200
     }
 
+    /// Main sessions and their subagents. Events from inside a subagent carry its `agent_id`; the subagent gets its own
+    /// row under its session, and a session with a running subagent counts as busy too.
     private func apply(id: String, event: String, json: [String: Any], now: Date) {
-        if event == "SessionEnd" { sessions.removeAll { $0.id == id }; return }
-        let name = (json["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Claude Code"
+        let agent = (json["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let kind = (json["agent_type"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent"
+        switch event {
+        case "SessionEnd": sessions.removeAll { $0.id == id || $0.parent == id }; return
+        case "SubagentStop": if let agent { sessions.removeAll { $0.id == agent } }; return
+        default: break
+        }
         let update: (State, String)?
         switch event {
-        case "UserPromptSubmit": update = (.working, "Claude Code, working")
-        case "PostToolUse": update = (.working, "Claude Code, " + Self.activity(json["tool_name"] as? String))
-        case "Stop": update = (.idle, "Claude Code, finished its turn")
+        case "UserPromptSubmit", "SubagentStart": update = (.working, "working")
+        case "PostToolUse": update = (.working, Self.activity(json["tool_name"] as? String))
+        case "Stop": update = (.idle, "finished its turn")
         case "Notification":
             switch json["notification_type"] as? String {
             case "permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input":
-                update = (.attention, json["message"] as? String ?? "Claude Code needs you")
-            case "idle_prompt": update = (.idle, "Claude Code, waiting for you")
+                update = (.attention, json["message"] as? String ?? "needs you")
+            case "idle_prompt": update = (.idle, "waiting for you")
             default: update = nil
             }
         default: update = nil
         }
         guard let update else { return }
-        let s = Session(id: id, name: name, state: update.0, detail: update.1, updated: now)
-        sessions.removeAll { $0.id == id }
-        sessions.insert(s, at: 0)
+        let who = agent == nil ? "Claude Code" : kind
+        let detail = update.0 == .attention ? update.1 : "\(who), \(update.1)"
+        let name = agent == nil ? (json["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Claude Code" : kind
+        upsert(Session(id: agent ?? id, parent: agent == nil ? nil : id, name: name, state: update.0, detail: detail, updated: now))
+        if agent != nil, let i = sessions.firstIndex(where: { $0.id == id }) {
+            if sessions[i].state == .idle { sessions[i].state = .working; sessions[i].detail = "Claude Code, waiting on a subagent" }
+            sessions[i].updated = now
+        } else if agent != nil {
+            let cwdName = (json["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Claude Code"
+            upsert(Session(id: id, parent: nil, name: cwdName, state: .working, detail: "Claude Code, waiting on a subagent", updated: now))
+        }
         prune(now: now)
     }
+
+    private func upsert(_ s: Session) {
+        sessions.removeAll { $0.id == s.id }
+        sessions.insert(s, at: 0)
+    }
+
+    /// Main sessions newest first, each followed by its subagents.
+    var ordered: [Session] {
+        sessions.filter { $0.parent == nil }.flatMap { main in [main] + sessions.filter { $0.parent == main.id } }
+    }
+
+    /// Sessions and subagents that are working or waiting for John: the number beside the notch.
+    var activeCount: Int { sessions.filter { $0.state != .idle }.count }
+
 
     static func activity(_ tool: String?) -> String {
         switch tool {
@@ -166,7 +196,11 @@ final class Agents {
     }
 
     /// Sessions quiet for over an hour leave the list (a closed terminal sends nothing).
-    func prune(now: Date) { sessions.removeAll { now.timeIntervalSince($0.updated) > 3600 } }
+    func prune(now: Date) {
+        sessions.removeAll { now.timeIntervalSince($0.updated) > 3600 }
+        let mains = Set(sessions.filter { $0.parent == nil }.map(\.id))
+        sessions.removeAll { $0.parent.map { !mains.contains($0) } ?? false }   // subagents never outlive their session
+    }
 
     /// Compares secrets without stopping at the first difference.
     static func same(_ a: String, _ b: String) -> Bool {
@@ -181,8 +215,15 @@ final class Agents {
     static let hookCommand = #"curl -s -m 2 -o /dev/null -H @"$HOME/Library/Application Support/Top Shelf/agent-header" -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:7823/event || true"#
     static let marker = "127.0.0.1:7823/event"
 
+    /// True only when every event Top Shelf listens to is connected (an older install lacks the subagent events).
     static func hooksInstalled(settings: URL) -> Bool {
-        (try? String(contentsOf: settings, encoding: .utf8))?.contains(marker) == true
+        guard let data = try? Data(contentsOf: settings),
+              let hooks = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["hooks"] as? [String: Any] else { return false }
+        return events.allSatisfy { e in
+            (hooks[e] as? [[String: Any]] ?? []).contains { g in
+                (g["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) == true }
+            }
+        }
     }
 
     enum InstallError: Error { case unreadable, unwritable }
@@ -277,7 +318,7 @@ struct AgentsPage: View {
                     .font(Look.small).foregroundStyle(Look.dim)
             }
             ScrollView {
-                VStack(spacing: 8) { ForEach(agents.sessions) { row($0) } }
+                VStack(spacing: 6) { ForEach(agents.ordered) { row($0) } }
             }
             .scrollIndicators(.never)
             HStack {
@@ -297,7 +338,7 @@ struct AgentsPage: View {
         HStack(spacing: 10) {
             Circle().fill(s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 0) {
-                Text(s.name).font(Look.title).lineLimit(1)
+                Text(s.name).font(s.parent == nil ? Look.title : .system(size: 12, weight: .medium)).lineLimit(1)
                 Text(s.detail).font(Look.small).foregroundStyle(Look.dim).lineLimit(1)
             }
             Spacer(minLength: 8)
@@ -306,8 +347,9 @@ struct AgentsPage: View {
                 .foregroundStyle(s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim)
                 .background((s.state == .attention ? Look.orange : s.state == .working ? Look.green : Look.dim).opacity(0.2), in: Capsule())
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(Look.card, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.leading, s.parent == nil ? 0 : 24)   // subagents sit under their session
         .accessibilityElement(children: .combine)
     }
 

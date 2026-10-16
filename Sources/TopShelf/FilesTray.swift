@@ -129,7 +129,7 @@ struct FileDragSource: NSViewRepresentable {
 struct FilesPage: View {
     let model: ShelfModel
     @State private var airDropTargeted = false
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 6)   // one row of up to six, as tall as the Tray cards allow
 
     var body: some View {
         let tray = model.files
@@ -139,7 +139,7 @@ struct FilesPage: View {
                     Text("Drop files on the notch to keep them here.")
                         .font(Look.small).foregroundStyle(Look.dim)
                         .frame(maxWidth: .infinity, minHeight: 64)
-                        .background(Look.card, in: RoundedRectangle(cornerRadius: 12))
+                        .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 14))
                 } else {
                     LazyVGrid(columns: columns, spacing: 10) {
                         ForEach(tray.items) { item in tile(item) }
@@ -161,7 +161,7 @@ struct FilesPage: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity)
-        .background(Look.card, in: RoundedRectangle(cornerRadius: 12))
+        .background(Look.cardGradient, in: RoundedRectangle(cornerRadius: 14))
         .overlay(FileDragSource(url: item.url) { model.files.remove(item) })
         .accessibilityElement(children: .combine)
         .accessibilityHint("Drag out to move or copy it; click to open")

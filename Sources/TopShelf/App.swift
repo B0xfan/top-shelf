@@ -7,6 +7,11 @@ enum Main {
         #if TESTHARNESS
         if SelfTest.run(CommandLine.arguments) { return }
         #endif
+        // Same as the Agents page's Connect button, for setting it up from Terminal.
+        if CommandLine.arguments.contains("--connect-claude") {
+            do { let b = try Agents.installHooks(settings: Agents.claudeSettings); print("connected; backup: \(b?.lastPathComponent ?? "none needed")"); exit(0) }
+            catch { print("not changed: \(error)"); exit(1) }
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--music-check") { musicCheck(CommandLine.arguments.dropFirst(i + 1)) }
         let app = NSApplication.shared
         let delegate = AppDelegate()   // app.run() never returns, so this stays alive
@@ -47,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: "Top Shelf")
         statusItem.menu = makeMenu()
+        model.showMenu = { [weak self] in self?.statusItem.menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
     }
 
     private func makeMenu() -> NSMenu {

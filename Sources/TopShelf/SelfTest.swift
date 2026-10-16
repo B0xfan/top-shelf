@@ -44,18 +44,20 @@ enum SelfTest {
         check("toggling the open page closes", !m.isOpen)
         m.open(.tray, byHover: true); m.toggle(.files)
         check("toggling another page switches to it", m.isOpen && m.page == .files && !m.openedByHover)
-        check("open size matches the mockup (680 x 236 with a 32 pt notch)", m.openSize == CGSize(width: 680, height: 236))
+        check("open size matches Bartender's (611 x 174)", m.openSize == CGSize(width: 611, height: 174))
         check("closed with nothing going on: exactly the notch", m.collapsedSize.width == m.geometry.notchWidth)
         func agentPost(_ json: String) { _ = SelfTest.post(m.agents, json) }
         agentPost(#"{"session_id":"w","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#)
-        check("dot: a working session shows green, with no music or meeting", m.hasBanners && m.agents.activeState == .working)
-        check("closed with only the dot: 18 pt on the right, nothing on the left", m.collapsedSize.width == m.geometry.notchWidth + 18 && m.leftSide == 0)
-        m.music.apply(["title": "Song", "playing": true])
-        check("closed with music and the dot: 28 pt left, 18 pt right (225 pt with a 179 pt notch)",
-              m.leftSide == 28 && m.rightSide == 18 && m.collapsedSize.width == m.geometry.notchWidth + 46)
-        m.music.apply(["title": "Song", "playing": false])
+        check("closed: a working session shows, with no music or meeting", m.hasBanners && m.agents.activeState == .working && m.agents.activeCount == 1)
+        check("closed: Bartender's width, 37.5 pt a side plus a 3 pt flare (260 pt with a 179 pt notch)",
+              m.collapsedSize.width == m.geometry.notchWidth + 81)
         agentPost(#"{"session_id":"n","hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/x/q"}"#)
-        check("dot: attention wins over working", m.agents.activeState == .attention)
+        check("closed: waiting for John wins over working, and both count", m.agents.activeState == .attention && m.agents.activeCount == 2)
+        agentPost(#"{"session_id":"n","hook_event_name":"Stop","cwd":"/x/q"}"#)
+        agentPost(#"{"session_id":"w","hook_event_name":"Stop","cwd":"/x/p"}"#)
+        check("closed: idle sessions do not count", m.agents.activeCount == 0 && !m.hasBanners)
+        m.music.apply(["title": "Song", "playing": true])
+        check("closed: music alone shows, same width", m.hasBanners && m.collapsedSize.width == m.geometry.notchWidth + 81)
         m.hoverDelay = 0.8
         check("hover delay is remembered", UserDefaults.standard.double(forKey: "hoverDelay") == 0.8)
     }
@@ -215,6 +217,25 @@ extension SelfTest {
         check("agents: stop means idle, and no dot", a.sessions.first?.state == .idle && a.activeState == nil)
         _ = post(a, #"{"session_id":"s1","hook_event_name":"SessionEnd"}"#)
         check("agents: an ended session leaves the list", a.sessions.isEmpty)
+
+        // Subagents: their own rows under the session, counted while they work.
+        _ = post(a, #"{"session_id":"m","hook_event_name":"UserPromptSubmit","cwd":"/x/main-project"}"#)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStart","agent_id":"a1","agent_type":"Explore","cwd":"/x/main-project"}"#)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStart","agent_id":"a2","agent_type":"general-purpose","cwd":"/x/main-project"}"#)
+        check("subagents: a session plus two subagents counts 3", a.activeCount == 3)
+        check("subagents: listed under their session", a.ordered.map(\.id) == ["m", "a2", "a1"] && a.ordered[1].parent == "m")
+        _ = post(a, #"{"session_id":"m","hook_event_name":"PostToolUse","agent_id":"a1","agent_type":"Explore","tool_name":"Grep","cwd":"/x/main-project"}"#)
+        check("subagents: their tool use updates their own row", a.sessions.first { $0.id == "a1" }?.detail == "Explore, reading files"
+              && a.sessions.first { $0.id == "m" }?.detail == "Claude Code, working")
+        _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"a1","agent_type":"Explore"}"#)
+        check("subagents: a finished one leaves", a.activeCount == 2 && !a.sessions.contains { $0.id == "a1" })
+        _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"","agent_type":""}"#)
+        check("subagents: Claude's own helpers stopping change nothing", a.activeCount == 2)
+        _ = post(a, #"{"session_id":"z","hook_event_name":"SubagentStart","agent_id":"z1","agent_type":"Plan","cwd":"/x/other"}"#)
+        check("subagents: an unseen session appears as working", a.sessions.first { $0.id == "z" }?.state == .working && a.activeCount == 4)
+        _ = post(a, #"{"session_id":"m","hook_event_name":"SessionEnd"}"#)
+        check("subagents: leave with their session", !a.sessions.contains { $0.id == "a2" || $0.id == "m" })
+        _ = post(a, #"{"session_id":"z","hook_event_name":"SessionEnd"}"#)
         _ = post(a, #"{"session_id":"s2","hook_event_name":"Stop","cwd":"/x/y"}"#)
         a.prune(now: Date().addingTimeInterval(3601))
         check("agents: quiet sessions leave after an hour", a.sessions.isEmpty)
@@ -233,7 +254,7 @@ extension SelfTest {
         let hooks = after?["hooks"] as? [String: Any]
         check("install: a backup of the old settings is made first", backup.flatMap { try? String(contentsOf: $0, encoding: .utf8) } == original)
         check("install: John's own settings and hooks are kept", after?["model"] as? String == "opus" && (hooks?["Stop"] as? [Any])?.count == 2)
-        check("install: all five events are connected", Agents.events.allSatisfy { (hooks?[$0] as? [Any])?.isEmpty == false })
+        check("install: every event is connected, subagents included", Agents.events.allSatisfy { (hooks?[$0] as? [Any])?.isEmpty == false })
         check("install: shows as installed", Agents.hooksInstalled(settings: settings))
         check("install: the secret is not in Claude's settings", !((try? String(contentsOf: settings, encoding: .utf8)) ?? "").contains(a.token))
         Thread.sleep(forTimeInterval: 1.1)   // backups are named by the second
@@ -300,7 +321,7 @@ enum Shots {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let model = ShelfModel()
         Sample.fill(model)
-        var states: [(String, Bool, Page)] = [("collapsed", false, .tray)]
+        var states: [(String, Bool, Page)] = [("collapsed-agents", false, .tray)]
         for p in Page.allCases { states.append((p.rawValue.lowercased(), true, p)) }
         for (name, open, page) in states {
             model.page = page
@@ -308,6 +329,12 @@ enum Shots {
             shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
                  to: dir.appendingPathComponent("\(name).png"))
         }
+        // closed with only music playing
+        _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SessionEnd"}"#)
+        _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"SessionEnd"}"#)
+        model.isOpen = false
+        shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
+             to: dir.appendingPathComponent("collapsed-music.png"))
     }
 
     /// Draws a real window off screen (unlike ImageRenderer, text fields and AppKit views show up).
@@ -332,7 +359,7 @@ enum Shots {
 /// Mockup sample data for the pictures only.
 enum Sample {
     static func fill(_ model: ShelfModel) {
-        model.music.apply(["title": "Sample Song", "artist": "Sample Artist", "playing": true])
+        model.music.apply(["title": "Sample Song", "artist": "Sample Artist", "album": "Sample Album", "playing": true])
         model.calendar.now = Date()
         model.calendar.next = .init(title: "Design sync", start: Date().addingTimeInterval(11 * 60 - 1), end: Date().addingTimeInterval(41 * 60))
         model.weather.temperature = Measurement(value: 24, unit: .celsius)
@@ -350,6 +377,7 @@ enum Sample {
         model.clipboard.togglePin(model.clipboard.clips[0])
         _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude Code, asking permission to run a command","cwd":"/x/sample-website"}"#)
         _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"PostToolUse","tool_name":"Edit","cwd":"/x/sample-project"}"#)
+        _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SubagentStart","agent_id":"s1","agent_type":"Explore","cwd":"/x/sample-project"}"#)
     }
 }
 #endif

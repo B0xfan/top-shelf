@@ -36,22 +36,21 @@ final class ShelfModel {
     func close() { isOpen = false }
     func toggle(_ p: Page) { if isOpen && page == p { close() } else { open(p) } }
 
-    /// Activity shown beside the notch while the shelf is closed: music on the left, the Claude Code dot on the right.
-    var hasBanners: Bool { leftSide + rightSide > 0 }
-
-    static let openWidth: CGFloat = 680
-    static let bodyHeight: CGFloat = 204   // page area plus page dots, as in the mockup (236 total with a 32 pt notch)
-    /// The closed notch grows only by what it shows, tight against the camera notch like a Dynamic Island:
-    /// 28 pt on the left for art and bars while music plays, 18 pt on the right for the Claude Code dot.
-    static let musicSide: CGFloat = 28
-    static let dotSide: CGFloat = 18
+    /// Something shows beside the closed notch: Claude Code activity or music.
     var showsMusic: Bool { music.isPlaying && music.hasTrack }
-    var leftSide: CGFloat { showsMusic ? Self.musicSide : 0 }
-    var rightSide: CGFloat { agents.activeState != nil ? Self.dotSide : 0 }
+    var hasBanners: Bool { showsMusic || agents.activeState != nil }
+    /// The gear button opens the same menu as the menu bar icon (set by the app).
+    @ObservationIgnored var showMenu: (() -> Void)?
+
+    /// Sizes measured from John's screenshots of Bartender's Top Shelf (Retina pictures, 2 pixels per point):
+    /// closed with activity it is 254 pt wide around a 179 pt notch (37.5 pt a side), the top flaring out 3 pt;
+    /// open it is 611 x 174 pt.
+    static let side: CGFloat = 37.5
+    static let flare: CGFloat = 3
     var collapsedSize: CGSize {
-        CGSize(width: geometry.notchWidth + leftSide + rightSide, height: geometry.notchHeight)
+        CGSize(width: geometry.notchWidth + (hasBanners ? 2 * (Self.side + Self.flare) : 0), height: geometry.notchHeight)
     }
-    var openSize: CGSize { CGSize(width: Self.openWidth, height: geometry.notchHeight + Self.bodyHeight) }
+    var openSize: CGSize { CGSize(width: 611, height: 174) }
 }
 
 /// Where the notch is. Screens without a notch get a capsule of the same job at the top center.
@@ -146,7 +145,7 @@ final class ShelfController {
             self?.model.close(); return nil
         }) { monitors.append(m) }
 
-        observe({ _ = model.isOpen; _ = model.collapsedSize; _ = model.leftSide; _ = model.page }) { [weak self] in self?.layout() }
+        observe({ _ = model.isOpen; _ = model.collapsedSize; _ = model.page }) { [weak self] in self?.layout() }
         place()
         updateFullscreen()
     }
@@ -160,10 +159,8 @@ final class ShelfController {
 
     private func layout() {
         guard let s = screen else { return }
-        func frame(_ size: CGSize, left: CGFloat? = nil) -> NSRect {
-            // closed: the notch stays exactly behind its own gap even when the two sides differ in width
-            let x = left.map { s.frame.midX - model.geometry.notchWidth / 2 - $0 } ?? s.frame.midX - size.width / 2
-            return NSRect(x: x, y: s.frame.maxY - size.height, width: size.width, height: size.height)
+        func frame(_ size: CGSize) -> NSRect {
+            NSRect(x: s.frame.midX - size.width / 2, y: s.frame.maxY - size.height, width: size.width, height: size.height)
         }
         if model.isOpen {
             panel.setFrame(frame(model.openSize), display: true)
@@ -174,7 +171,7 @@ final class ShelfController {
             // shrink the window after the closing animation, unless it was reopened meanwhile
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 guard let self, !self.model.isOpen else { return }
-                self.panel.setFrame(frame(self.model.collapsedSize, left: self.model.leftSide), display: true)
+                self.panel.setFrame(frame(self.model.collapsedSize), display: true)
             }
         }
         if !isFullscreen { panel.orderFrontRegardless() }
