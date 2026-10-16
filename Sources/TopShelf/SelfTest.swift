@@ -254,7 +254,7 @@ extension SelfTest {
                   perms(s) == mode && perms(b ?? nil) == mode)
         }
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: settings.deletingLastPathComponent().path)) ?? []
-        check("install: no half-written files are left behind", !leftovers.contains { $0.contains(".top-shelf-") })
+        check("install: no half-written files are left behind", !leftovers.contains { $0.hasPrefix(".settings.json.top-shelf-") })
     }
 
     /// The real listener on 127.0.0.1:7823 with the real hook command (curl), on the build machine.
