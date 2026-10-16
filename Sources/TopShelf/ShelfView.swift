@@ -52,12 +52,30 @@ struct ShelfView: View {
         .onTapGesture { model.isOpen ? model.close() : model.open(.tray) }
     }
 
-    @ViewBuilder private var leftBanner: some View { EmptyView() }
-    @ViewBuilder private var rightBanner: some View { EmptyView() }
+    @ViewBuilder private var leftBanner: some View {
+        if model.music.isPlaying && model.music.hasTrack {
+            HStack(spacing: 6) {
+                Artwork(image: model.music.artwork, size: 20)
+                PlayingBars(animate: !reduceMotion)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Playing \(model.music.title ?? "")")
+        }
+    }
+
+    @ViewBuilder private var rightBanner: some View {
+        if let e = model.calendar.soon {
+            HStack(spacing: 4) {
+                Text(e.title).lineLimit(1)
+                Text(e.start.formatted(date: .omitted, time: .shortened)).fixedSize()
+            }
+            .font(Look.small)
+        }
+    }
 
     @ViewBuilder private var page: some View {
         switch model.page {
-        case .tray: Text("Tray").font(Look.small).foregroundStyle(Look.dim)
+        case .tray: TrayPage(model: model)
         case .files: Text("Files").font(Look.small).foregroundStyle(Look.dim)
         case .clipboard: Text("Clipboard").font(Look.small).foregroundStyle(Look.dim)
         case .agents: Text("Agents").font(Look.small).foregroundStyle(Look.dim)
@@ -81,5 +99,22 @@ struct ShelfView: View {
                 .accessibilityAddTraits(model.page == p ? .isSelected : [])
             }
         }
+    }
+}
+
+/// Three green bars that bounce while music plays (still when Reduce Motion is on).
+struct PlayingBars: View {
+    let animate: Bool
+    @State private var up = false
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<3) { i in
+                RoundedRectangle(cornerRadius: 1).fill(Look.green)
+                    .frame(width: 2, height: up || !animate ? 12 : 3)
+                    .animation(animate ? .easeInOut(duration: 0.8).repeatForever().delay(Double(i) * 0.2) : nil, value: up)
+            }
+        }
+        .frame(height: 12)
+        .onAppear { up = true }
     }
 }

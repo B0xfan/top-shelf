@@ -7,6 +7,7 @@ enum Main {
         #if TESTHARNESS
         if SelfTest.run(CommandLine.arguments) { return }
         #endif
+        if let i = CommandLine.arguments.firstIndex(of: "--music-check") { musicCheck(CommandLine.arguments.dropFirst(i + 1)) }
         let app = NSApplication.shared
         let delegate = AppDelegate()   // app.run() never returns, so this stays alive
         app.delegate = delegate
@@ -15,8 +16,22 @@ enum Main {
     }
 }
 
+/// Windowless check of the built app's music link: prints what plays, sends any commands given
+/// (play, pause, next, previous), prints again, then quits. Opens no window.
+func musicCheck(_ commands: ArraySlice<String>) -> Never {
+    let music = NowPlaying(resources: Bundle.main.resourceURL)
+    func report(_ label: String) {
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        print("\(label): available=\(music.available) player=\(music.playerID ?? "-") title=\(music.title ?? "-") playing=\(music.isPlaying) artwork=\(music.artwork != nil)")
+    }
+    report("start")
+    let names: [String: NowPlaying.Command] = ["play": .play, "pause": .pause, "next": .next, "previous": .previous]
+    for c in commands { if let cmd = names[c] { music.send(cmd); report(c) } }
+    exit(music.available ? 0 : 1)
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let model = ShelfModel()
+    let model = ShelfModel(live: true)
     private var controller: ShelfController!
     private var statusItem: NSStatusItem!
     private var hotKeys: [HotKey] = []

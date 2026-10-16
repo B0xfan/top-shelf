@@ -14,13 +14,23 @@ final class ShelfModel {
         didSet { UserDefaults.standard.set(hoverDelay, forKey: "hoverDelay") }
     }
     var geometry = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 32)
+    let music: NowPlaying
+    let calendar: CalendarService
+    let weather: WeatherService
+
+    /// `live` starts the system services; the self-test and pictures use a quiet model.
+    init(live: Bool = false) {
+        music = NowPlaying(resources: live ? Bundle.main.resourceURL : nil)
+        calendar = CalendarService(live: live)
+        weather = WeatherService(live: live)
+    }
 
     func open(_ p: Page, byHover: Bool = false) { page = p; openedByHover = byHover; isOpen = true }
     func close() { isOpen = false }
     func toggle(_ p: Page) { if isOpen && page == p { close() } else { open(p) } }
 
     /// Activity shown beside the notch while the shelf is closed (filled in by the services).
-    var hasBanners: Bool { false }
+    var hasBanners: Bool { (music.isPlaying && music.hasTrack) || calendar.soon != nil }
 
     static let openWidth: CGFloat = 680
     static let bodyHeight: CGFloat = 204   // page area plus page dots, as in the mockup (236 total with a 32 pt notch)
@@ -83,6 +93,8 @@ final class ShelfController {
     private var hoverWork: DispatchWorkItem?
     private var leaveWork: DispatchWorkItem?
     private var monitors: [Any] = []
+    /// False after a close until the pointer leaves the notch, so closing with the pointer on the notch does not reopen it.
+    private var hoverArmed = true
 
     init(model: ShelfModel) {
         self.model = model
@@ -106,7 +118,11 @@ final class ShelfController {
         let nc = NotificationCenter.default, wc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.place() }
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-            wc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.updateFullscreen() }
+            wc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.updateFullscreen()
+                // the fullscreen animation may still be running; look again once it has settled
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self?.updateFullscreen() }
+            }
         }
         // A click in any other app closes an open shelf (global monitors only see clicks outside Top Shelf).
         if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
@@ -138,6 +154,7 @@ final class ShelfController {
             panel.setFrame(frame(model.openSize), display: true)
             if model.page == .clipboard && !model.openedByHover { panel.makeKey() }   // search takes typing right away
         } else {
+            hoverArmed = false
             if panel.isKeyWindow { panel.orderOut(nil) }   // hand typing back to the app John was in
             // shrink the window after the closing animation, unless it was reopened meanwhile
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -157,8 +174,8 @@ final class ShelfController {
     private func mouseMoved(_ p: NSPoint) {
         leaveWork?.cancel(); leaveWork = nil
         guard !model.isOpen, model.hoverDelay >= 0 else { return }
-        if !notchRect.insetBy(dx: -1, dy: -1).contains(p) { hoverWork?.cancel(); hoverWork = nil; return }
-        guard hoverWork == nil else { return }
+        if !notchRect.insetBy(dx: -1, dy: -1).contains(p) { hoverArmed = true; hoverWork?.cancel(); hoverWork = nil; return }
+        guard hoverArmed, hoverWork == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             self?.hoverWork = nil
             if self?.model.isOpen == false { self?.model.open(.tray, byHover: true) }
@@ -168,6 +185,7 @@ final class ShelfController {
     }
 
     private func mouseLeft() {
+        hoverArmed = true
         hoverWork?.cancel(); hoverWork = nil
         guard model.isOpen, model.openedByHover else { return }   // a click or shortcut opening stays until dismissed
         let work = DispatchWorkItem { [weak self] in self?.model.close() }
