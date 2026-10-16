@@ -182,7 +182,29 @@ final class Agents {
         (try? String(contentsOf: settings, encoding: .utf8))?.contains(marker) == true
     }
 
-    enum InstallError: Error { case unreadable }
+    enum InstallError: Error { case unreadable, unwritable }
+
+    /// Writes a file that never exists with looser permissions than `mode`, not even for a moment:
+    /// a new file is created with the mode, filled, then renamed over the target. `replace: false` refuses an existing target.
+    static func writeKeepingPrivate(_ data: Data, to url: URL, mode: Int, replace: Bool = true) throws {
+        if !replace && FileManager.default.fileExists(atPath: url.path) { throw InstallError.unwritable }
+        let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).top-shelf-\(UUID().uuidString)")
+        let fd = open(tmp.path, O_WRONLY | O_CREAT | O_EXCL, mode_t(mode))
+        guard fd >= 0 else { throw InstallError.unwritable }
+        let h = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        do {
+            try h.write(contentsOf: data)
+            try h.synchronize()
+            try h.close()
+            guard fchmodIfNeeded(tmp, mode), rename(tmp.path, url.path) == 0 else { throw InstallError.unwritable }
+        } catch {
+            unlink(tmp.path)
+            throw error
+        }
+    }
+
+    /// open() trims the mode by the umask; set it exactly so a 0640 original stays 0640.
+    private static func fchmodIfNeeded(_ url: URL, _ mode: Int) -> Bool { chmod(url.path, mode_t(mode)) == 0 }
 
     /// Backs up Claude Code's settings file, then adds the Top Shelf hooks (once; existing hooks are kept).
     /// Returns the backup's location (nil when there was no settings file yet).
@@ -191,7 +213,10 @@ final class Agents {
         let fm = FileManager.default
         var root: [String: Any] = [:]
         var backup: URL?
+        // Claude Code's settings can hold secrets: the backup and the new file keep the original's permissions (0600 if new).
+        var mode = 0o600
         if fm.fileExists(atPath: settings.path) {
+            mode = (try fm.attributesOfItem(atPath: settings.path)[.posixPermissions] as? Int) ?? 0o600
             let data = try Data(contentsOf: settings)
             guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw InstallError.unreadable }
             root = obj
@@ -199,7 +224,7 @@ final class Agents {
             f.dateFormat = "yyyyMMdd-HHmmss"
             let stamp = f.string(from: now)
             let b = settings.deletingLastPathComponent().appendingPathComponent("settings.json.top-shelf-backup-\(stamp)")
-            try data.write(to: b, options: .withoutOverwriting)
+            try writeKeepingPrivate(data, to: b, mode: mode, replace: false)
             backup = b
         } else {
             try fm.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -215,7 +240,7 @@ final class Agents {
         }
         root["hooks"] = hooks
         let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .withoutEscapingSlashes])
-        try out.write(to: settings, options: .atomic)
+        try writeKeepingPrivate(out, to: settings, mode: mode)
         return backup
     }
 

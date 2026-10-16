@@ -64,6 +64,7 @@ final class ClipboardHistory {
                         key: fingerprint(Data(paths.joined(separator: "\n").utf8)), last: now)
         }
         if let s = pb.string(forType: .string), !s.isEmpty {
+            guard s.utf8.count <= 1_000_000 else { return nil }   // a huge copy (a whole log) would be rewritten to disk on every copy
             let rtf = pb.data(forType: .rtf)
             return Clip(kind: rtf == nil ? .text : .rich, text: s, rtf: rtf, key: fingerprint(Data(s.utf8)), last: now)
         }

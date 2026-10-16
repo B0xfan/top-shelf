@@ -239,8 +239,22 @@ extension SelfTest {
         try! Data("{ not json".utf8).write(to: broken)
         check("install: an unreadable settings file is left untouched",
               (try? Agents.installHooks(settings: broken)) == nil && (try? String(contentsOf: broken, encoding: .utf8)) == "{ not json")
+        func perms(_ u: URL?) -> Int? { u.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.posixPermissions] as? Int } }
         let fresh = d.appendingPathComponent("none/settings.json")
-        check("install: works when Claude Code has no settings file yet", (try? Agents.installHooks(settings: fresh)) != nil && Agents.hooksInstalled(settings: fresh))
+        let freshBackup: URL?? = try? Agents.installHooks(settings: fresh)
+        check("install: works when Claude Code has no settings file yet (no backup needed)",
+              freshBackup != nil && freshBackup! == nil && Agents.hooksInstalled(settings: fresh))
+        check("install: a new settings file is private (0600)", perms(fresh) == 0o600)
+        for mode in [0o600, 0o640] {
+            let s = d.appendingPathComponent("mode\(mode)/settings.json")
+            try? FileManager.default.createDirectory(at: s.deletingLastPathComponent(), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: s.path, contents: Data("{}".utf8), attributes: [.posixPermissions: mode])
+            let b = try? Agents.installHooks(settings: s)
+            check("install: settings and backup keep the original permissions (\(String(mode, radix: 8)))",
+                  perms(s) == mode && perms(b ?? nil) == mode)
+        }
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: settings.deletingLastPathComponent().path)) ?? []
+        check("install: no half-written files are left behind", !leftovers.contains { $0.contains(".top-shelf-") })
     }
 
     /// The real listener on 127.0.0.1:7823 with the real hook command (curl), on the build machine.
