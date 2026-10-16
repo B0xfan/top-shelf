@@ -122,6 +122,7 @@ extension SelfTest {
         let closedEarly = !m.isOpen
         wait(1) { !m.isOpen }
         check("settings: the 0.3 s close delay is honoured (open at 0.1 s, closed after)", !closedEarly && !m.isOpen)
+        m.open(.tray); m.close(); hover.closed()   // closed by a click while the pointer stays on the notch (what the window reports)
         hover.moved(inNotch: true)
         wait(0.5) { m.isOpen }
         check("settings: closing with the pointer still on the notch does not reopen it", !m.isOpen)
