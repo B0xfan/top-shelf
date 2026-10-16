@@ -46,9 +46,9 @@ struct ShelfView: View {
     private var notchRow: some View {
         HStack(spacing: 0) {
             if !model.isOpen && model.hasBanners {
-                leftBanner.frame(width: ShelfModel.sideWidth)
+                leftBanner.frame(width: model.leftSide, alignment: .trailing)
                 Spacer(minLength: 0)   // the camera notch itself; nothing can be seen there
-                rightBanner.frame(width: ShelfModel.sideWidth)
+                rightBanner.frame(width: model.rightSide)
             } else {
                 Spacer()
             }
@@ -59,9 +59,9 @@ struct ShelfView: View {
     }
 
     @ViewBuilder private var leftBanner: some View {
-        if model.music.isPlaying && model.music.hasTrack {
-            HStack(spacing: 4) {
-                Artwork(image: model.music.artwork, size: 18)
+        if model.showsMusic {
+            HStack(spacing: 2) {   // 16 + 2 + 8 = 26 of the 28 pt, leaving 2 pt so the corner never clips the art
+                Artwork(image: model.music.artwork, size: 16)
                 PlayingBars(animate: !reduceMotion)
             }
             .accessibilityElement(children: .ignore)
@@ -112,7 +112,7 @@ struct PlayingBars: View {
     let animate: Bool
     @State private var up = false
     var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
+        HStack(alignment: .bottom, spacing: 1) {
             ForEach(0..<3) { i in
                 RoundedRectangle(cornerRadius: 1).fill(Look.green)
                     .frame(width: 2, height: up || !animate ? 12 : 3)

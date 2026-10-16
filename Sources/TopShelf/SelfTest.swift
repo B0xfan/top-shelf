@@ -49,7 +49,11 @@ enum SelfTest {
         func agentPost(_ json: String) { _ = SelfTest.post(m.agents, json) }
         agentPost(#"{"session_id":"w","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#)
         check("dot: a working session shows green, with no music or meeting", m.hasBanners && m.agents.activeState == .working)
-        check("closed with the dot: only 42 pt wider on each side", m.collapsedSize.width == m.geometry.notchWidth + 84)
+        check("closed with only the dot: 18 pt on the right, nothing on the left", m.collapsedSize.width == m.geometry.notchWidth + 18 && m.leftSide == 0)
+        m.music.apply(["title": "Song", "playing": true])
+        check("closed with music and the dot: 28 pt left, 18 pt right (225 pt with a 179 pt notch)",
+              m.leftSide == 28 && m.rightSide == 18 && m.collapsedSize.width == m.geometry.notchWidth + 46)
+        m.music.apply(["title": "Song", "playing": false])
         agentPost(#"{"session_id":"n","hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/x/q"}"#)
         check("dot: attention wins over working", m.agents.activeState == .attention)
         m.hoverDelay = 0.8
