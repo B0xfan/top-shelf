@@ -80,7 +80,7 @@ struct ShelfView: View {
         }
         .frame(height: model.geometry.notchHeight)
         .contentShape(Rectangle())
-        .onTapGesture { model.open(.tray) }
+        .onTapGesture { if model.openMode != .hover { model.open(.tray) } }   // "Hover" in Settings means clicks do not open it
     }
 
     @ViewBuilder private var leftItem: some View {
@@ -113,7 +113,7 @@ struct ShelfView: View {
                 }
                 Color.clear.contentShape(Rectangle()).onTapGesture { model.close() }   // the strip around the notch closes the shelf
                 if model.page == .clipboard { search.frame(width: 150) }
-                RoundButton(symbol: "gearshape.fill", label: "Settings", selected: false) { model.showMenu?() }
+                RoundButton(symbol: "gearshape.fill", label: "Settings", selected: false) { model.openSettings?() }
             }
             .frame(height: 30)
             .padding(.horizontal, 10)

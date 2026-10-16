@@ -29,7 +29,8 @@ final class FilesTray {
     }
 
     static let limit = 6
-    static let keepFor: TimeInterval = 24 * 3600   // shortcut: fixed one day, make it a setting when a Settings window is designed
+    /// Set from Settings; nil = until removed.
+    var keepFor: TimeInterval? = 24 * 3600
     private(set) var items: [Item] = []
     private let store: URL?
 
@@ -59,7 +60,9 @@ final class FilesTray {
     /// Drops expired entries and files that no longer exist.
     func prune(now: Date = Date()) {
         let before = items.count
-        items.removeAll { now.timeIntervalSince($0.added) > Self.keepFor || !FileManager.default.fileExists(atPath: $0.path) }
+        items.removeAll { item in
+            (keepFor.map { now.timeIntervalSince(item.added) > $0 } ?? false) || !FileManager.default.fileExists(atPath: item.path)
+        }
         if items.count != before { save() }
     }
 

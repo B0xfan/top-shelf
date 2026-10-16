@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: "Top Shelf")
         statusItem.menu = makeMenu()
-        model.showMenu = { [weak self] in self?.statusItem.menu?.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
+        model.openSettings = { [weak self] in self.map { SettingsWindow.show($0.model) } }
     }
 
     private func makeMenu() -> NSMenu {
@@ -60,16 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Open Top Shelf", "t", [.command, .option]) { [weak self] in self?.model.open(.tray) })
         menu.addItem(item("Open Clipboard", "v", [.command, .option]) { [weak self] in self?.model.open(.clipboard) })
         menu.addItem(.separator())
-        let delay = NSMenuItem(title: "Open on Hover", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        for (title, value) in [("Off", -1.0), ("Right Away", 0.0), ("After a Short Pause", 0.3), ("After a Long Pause", 0.8)] {
-            let i = item(title) { [weak self] in self?.model.hoverDelay = value }
-            i.representedObject = value
-            sub.addItem(i)
-        }
-        sub.delegate = self
-        delay.submenu = sub
-        menu.addItem(delay)
+        menu.addItem(item("Settings…", ",", [.command]) { [weak self] in self.map { SettingsWindow.show($0.model) } })
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Top Shelf", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         return menu
@@ -82,11 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-extension AppDelegate: NSMenuDelegate {
-    func menuNeedsUpdate(_ menu: NSMenu) {   // tick the current hover choice
-        for i in menu.items { i.state = (i.representedObject as? Double) == model.hoverDelay ? .on : .off }
-    }
-}
 
 /// A menu item that runs a closure, so the menu needs no selector plumbing.
 final class MenuAction: NSMenuItem {

@@ -22,7 +22,7 @@ final class ClipboardHistory {
         var last: Date
     }
 
-    static let keepFor: TimeInterval = 7 * 24 * 3600   // shortcut: fixed one week, make it a setting when a Settings window is designed
+    var keepFor: TimeInterval = 7 * 24 * 3600   // set from Settings
     static let maxClips = 200
     /// Pasteboard markers that password managers and similar apps set (nspasteboard.org).
     static let privateTypes: Set<String> = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType",
@@ -100,7 +100,7 @@ final class ClipboardHistory {
         let keep = clips.filter { c in
             if c.pinned { return true }
             unpinned += 1
-            return unpinned <= Self.maxClips && now.timeIntervalSince(c.last) <= Self.keepFor
+            return unpinned <= Self.maxClips && now.timeIntervalSince(c.last) <= keepFor
         }
         for gone in clips where !keep.contains(gone) {
             if let f = gone.imageFile, let url = imageURL(f) { try? FileManager.default.removeItem(at: url) }

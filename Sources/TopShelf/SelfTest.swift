@@ -27,7 +27,7 @@ enum SelfTest {
         return false
     }
 
-    static var tests: [() -> Void] = [shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
+    static var tests: [() -> Void] = [settingsTests, shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
 
     static func shelfTests() {
         let g = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 37)
@@ -58,8 +58,6 @@ enum SelfTest {
         check("closed: idle sessions do not count", m.agents.activeCount == 0 && !m.hasBanners)
         m.music.apply(["title": "Song", "playing": true])
         check("closed: music alone shows, same width", m.hasBanners && m.collapsedSize.width == m.geometry.notchWidth + 84)
-        m.hoverDelay = 0.8
-        check("hover delay is remembered", UserDefaults.standard.double(forKey: "hoverDelay") == 0.8)
     }
 }
 
@@ -100,6 +98,54 @@ extension SelfTest {
 }
 
 extension SelfTest {
+    static func settingsTests() {
+        let m = ShelfModel()
+        check("settings: defaults are Both, 0.3 s, 0.5 s, 1 day, 1 week",
+              m.openMode == .both && m.hoverDelay == 0.3 && m.hoverCloseDelay == 0.5 && m.keepFilesFor == 86400 && m.keepClipsFor == 604800)
+        m.openMode = .click; m.hoverDelay = 0.2; m.hoverCloseDelay = 0.3; m.keepFilesFor = 3600; m.keepClipsFor = 86400
+        let again = ShelfModel()
+        check("settings: kept after a relaunch", again.openMode == .click && again.hoverDelay == 0.2 && again.hoverCloseDelay == 0.3
+              && again.keepFilesFor == 3600 && again.keepClipsFor == 86400 && again.files.keepFor == 3600 && again.clipboard.keepFor == 86400)
+
+        let hover = HoverLogic(model: m)
+        hover.moved(inNotch: true)
+        wait(0.6) { m.isOpen }
+        check("settings: in Click mode hovering never opens the shelf", !m.isOpen)
+        m.openMode = .both
+        hover.moved(inNotch: true)
+        wait(0.05) { m.isOpen }
+        let openedEarly = m.isOpen
+        wait(1) { m.isOpen }
+        check("settings: the 0.2 s open delay is honoured (closed at 0.05 s, open after)", !openedEarly && m.isOpen && m.openedByHover)
+        hover.left()
+        wait(0.1) { !m.isOpen }
+        let closedEarly = !m.isOpen
+        wait(1) { !m.isOpen }
+        check("settings: the 0.3 s close delay is honoured (open at 0.1 s, closed after)", !closedEarly && !m.isOpen)
+        hover.moved(inNotch: true)
+        wait(0.5) { m.isOpen }
+        check("settings: closing with the pointer still on the notch does not reopen it", !m.isOpen)
+
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let f = d.appendingPathComponent("kept.txt")
+        FileManager.default.createFile(atPath: f.path, contents: Data())
+        m.files.add([f], now: Date().addingTimeInterval(-2 * 3600))
+        m.keepFilesFor = 3600
+        check("settings: 1 hour drops a file dropped 2 hours ago", m.files.items.isEmpty)
+        m.files.add([f], now: Date().addingTimeInterval(-400 * 86400))
+        m.keepFilesFor = 0
+        check("settings: Until removed keeps even a year-old file", m.files.items.count == 1 && m.files.keepFor == nil)
+        m.keepFilesFor = 604800
+        check("settings: switching to 1 week applies at once", m.files.items.isEmpty)
+        let old = ClipboardHistory.Clip(kind: .text, text: "old", key: "old", last: Date().addingTimeInterval(-2 * 86400))
+        m.clipboard.add(old)
+        m.keepClipsFor = 2592000
+        check("settings: 1 month keeps a 2-day-old clip", m.clipboard.clips.contains { $0.key == "old" })
+        m.keepClipsFor = 86400
+        check("settings: 1 day drops it at once", !m.clipboard.clips.contains { $0.key == "old" })
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier ?? "TopShelf")   // leave defaults for later checks
+    }
+
     static func tempDir() -> URL {
         let d = FileManager.default.temporaryDirectory.appendingPathComponent("topshelf-test-\(UUID().uuidString)")
         try! FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
@@ -132,7 +178,7 @@ extension SelfTest {
         try? FileManager.default.removeItem(at: urls[1])
         t.prune(now: Date())
         check("files: a deleted file leaves the tray", !t.items.contains { $0.path == urls[1].path })
-        t.prune(now: Date().addingTimeInterval(FilesTray.keepFor + 1))
+        t.prune(now: Date().addingTimeInterval(24 * 3600 + 1))
         check("files: everything expires after a day", t.items.isEmpty)
     }
 
@@ -174,7 +220,7 @@ extension SelfTest {
         check("clipboard: copying back puts it on the clipboard", pb.string(forType: .string) == "hello")
         check("clipboard: the history survives a restart", ClipboardHistory(dir: d, live: false).clips.count == h.clips.count)
         let picture = h.clips.first { $0.kind == .image }!.imageFile!
-        h.prune(now: Date().addingTimeInterval(ClipboardHistory.keepFor + 1))
+        h.prune(now: Date().addingTimeInterval(7 * 86400 + 1))
         check("clipboard: after a week only pinned clips stay", h.clips.map(\.text) == ["hello"])
         check("clipboard: an expired picture is deleted from disk",
               !FileManager.default.fileExists(atPath: d.appendingPathComponent("clipboard-images/" + picture).path))
@@ -329,6 +375,7 @@ enum Shots {
             shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
                  to: dir.appendingPathComponent("\(name).png"))
         }
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 560), to: dir.appendingPathComponent("settings.png"))
         // closed with only music playing
         _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SessionEnd"}"#)
         _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"SessionEnd"}"#)

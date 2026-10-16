@@ -10,8 +10,26 @@ final class ShelfModel {
     var page: Page = .tray
     var openedByHover = false
     /// Seconds before a hover over the notch opens the shelf; negative = hover does not open it.
-    var hoverDelay: Double = UserDefaults.standard.object(forKey: "hoverDelay") as? Double ?? 0.3 {
+    // Settings (Settings window). Saved at once and read by the code that uses them, so changes apply without a restart.
+    enum OpenMode: String, CaseIterable { case hover = "Hover", click = "Click", both = "Both" }
+    var openMode: OpenMode = OpenMode(rawValue: UserDefaults.standard.string(forKey: "openMode") ?? "") ?? .both {
+        didSet { UserDefaults.standard.set(openMode.rawValue, forKey: "openMode") }
+    }
+    /// Seconds the pointer waits on the notch before the shelf opens (0 to 1.5).
+    var hoverDelay: Double = max(0, UserDefaults.standard.object(forKey: "hoverDelay") as? Double ?? 0.3) {
         didSet { UserDefaults.standard.set(hoverDelay, forKey: "hoverDelay") }
+    }
+    /// Seconds after the pointer leaves a hover-opened shelf before it closes (0 to 3).
+    var hoverCloseDelay: Double = UserDefaults.standard.object(forKey: "hoverCloseDelay") as? Double ?? 0.5 {
+        didSet { UserDefaults.standard.set(hoverCloseDelay, forKey: "hoverCloseDelay") }
+    }
+    /// How long dropped files stay; 0 = until removed.
+    var keepFilesFor: TimeInterval = UserDefaults.standard.object(forKey: "keepFilesFor") as? Double ?? 86400 {
+        didSet { UserDefaults.standard.set(keepFilesFor, forKey: "keepFilesFor"); files.keepFor = keepFilesFor > 0 ? keepFilesFor : nil; files.prune() }
+    }
+    /// How long unpinned clipboard items stay.
+    var keepClipsFor: TimeInterval = UserDefaults.standard.object(forKey: "keepClipsFor") as? Double ?? 7 * 86400 {
+        didSet { UserDefaults.standard.set(keepClipsFor, forKey: "keepClipsFor"); clipboard.keepFor = keepClipsFor; clipboard.prune() }
     }
     var geometry = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 32)
     let music: NowPlaying
@@ -30,17 +48,27 @@ final class ShelfModel {
         files = FilesTray(store: dir?.appendingPathComponent("files.json"))
         clipboard = ClipboardHistory(dir: dir, live: live)
         agents = Agents(dir: dir, live: live)
+        files.keepFor = keepFilesFor > 0 ? keepFilesFor : nil
+        clipboard.keepFor = keepClipsFor
+        files.prune(); clipboard.prune()
+        // the old menu stored "hover off" as a negative delay
+        if (UserDefaults.standard.object(forKey: "hoverDelay") as? Double ?? 0) < 0, UserDefaults.standard.string(forKey: "openMode") == nil {
+            openMode = .click
+        }
     }
 
-    func open(_ p: Page, byHover: Bool = false) { page = p; openedByHover = byHover; isOpen = true }
+    func open(_ p: Page, byHover: Bool = false) {
+        page = p; openedByHover = byHover; isOpen = true
+        files.prune()   // expiry is checked whenever the shelf opens, so nothing old is ever shown
+    }
     func close() { isOpen = false }
     func toggle(_ p: Page) { if isOpen && page == p { close() } else { open(p) } }
 
     /// Something shows beside the closed notch: Claude Code activity or music.
     var showsMusic: Bool { music.isPlaying && music.hasTrack }
     var hasBanners: Bool { showsMusic || agents.activeState != nil }
-    /// The gear button opens the same menu as the menu bar icon (set by the app).
-    @ObservationIgnored var showMenu: (() -> Void)?
+    /// The gear button opens the Settings window (set by the app).
+    @ObservationIgnored var openSettings: (() -> Void)?
 
     /// Sizes measured from John's screenshots of Bartender's Top Shelf (Retina pictures, 2 pixels per point):
     /// closed with activity it is 254 pt wide around a 179 pt notch (37.5 pt a side), the top flaring out 3 pt;
@@ -102,11 +130,8 @@ final class ShelfController {
     private let model: ShelfModel
     private let panel: ShelfPanel
     private var screen: NSScreen?
-    private var hoverWork: DispatchWorkItem?
-    private var leaveWork: DispatchWorkItem?
     private var monitors: [Any] = []
-    /// False after a close until the pointer leaves the notch, so closing with the pointer on the notch does not reopen it.
-    private var hoverArmed = true
+    private lazy var hover = HoverLogic(model: model)
 
     init(model: ShelfModel) {
         self.model = model
@@ -166,7 +191,7 @@ final class ShelfController {
             panel.setFrame(frame(model.openSize), display: true)
             if model.page == .clipboard && !model.openedByHover { panel.makeKey() }   // search takes typing right away
         } else {
-            hoverArmed = false
+            hover.closed()
             if panel.isKeyWindow { panel.orderOut(nil) }   // hand typing back to the app John was in
             // shrink the window after the closing animation, unless it was reopened meanwhile
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -183,27 +208,8 @@ final class ShelfController {
         return NSRect(x: s.frame.midX - g.notchWidth / 2, y: s.frame.maxY - g.notchHeight, width: g.notchWidth, height: g.notchHeight)
     }
 
-    private func mouseMoved(_ p: NSPoint) {
-        leaveWork?.cancel(); leaveWork = nil
-        guard !model.isOpen, model.hoverDelay >= 0 else { return }
-        if !notchRect.insetBy(dx: -1, dy: -1).contains(p) { hoverArmed = true; hoverWork?.cancel(); hoverWork = nil; return }
-        guard hoverArmed, hoverWork == nil else { return }
-        let work = DispatchWorkItem { [weak self] in
-            self?.hoverWork = nil
-            if self?.model.isOpen == false { self?.model.open(.tray, byHover: true) }
-        }
-        hoverWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverDelay, execute: work)
-    }
-
-    private func mouseLeft() {
-        hoverArmed = true
-        hoverWork?.cancel(); hoverWork = nil
-        guard model.isOpen, model.openedByHover else { return }   // a click or shortcut opening stays until dismissed
-        let work = DispatchWorkItem { [weak self] in self?.model.close() }
-        leaveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
-    }
+    private func mouseMoved(_ p: NSPoint) { hover.moved(inNotch: notchRect.insetBy(dx: -1, dy: -1).contains(p)) }
+    private func mouseLeft() { hover.left() }
 
     // MARK: fullscreen
 
@@ -225,6 +231,41 @@ final class ShelfController {
             return b.size == size
         }
     }
+}
+
+/// Hover opening and closing, apart from the window so the self-test can drive it.
+final class HoverLogic {
+    private let model: ShelfModel
+    private var openWork: DispatchWorkItem?
+    private var closeWork: DispatchWorkItem?
+    /// False after a close until the pointer leaves the notch, so closing with the pointer on the notch does not reopen it.
+    private var armed = true
+
+    init(model: ShelfModel) { self.model = model }
+
+    func moved(inNotch: Bool) {
+        closeWork?.cancel(); closeWork = nil
+        guard !model.isOpen, model.openMode != .click else { return }
+        if !inNotch { armed = true; openWork?.cancel(); openWork = nil; return }
+        guard armed, openWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.openWork = nil
+            if let m = self?.model, !m.isOpen, m.openMode != .click { m.open(.tray, byHover: true) }
+        }
+        openWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverDelay, execute: work)
+    }
+
+    func left() {
+        armed = true
+        openWork?.cancel(); openWork = nil
+        guard model.isOpen, model.openedByHover else { return }   // a click or shortcut opening stays until dismissed
+        let work = DispatchWorkItem { [weak self] in self?.model.close() }
+        closeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverCloseDelay, execute: work)
+    }
+
+    func closed() { armed = false }
 }
 
 /// Runs `onChange` every time something read in `read` changes.
