@@ -35,7 +35,10 @@ final class Agents {
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.prune(now: Date()) }
     }
 
-    var needsAttention: Bool { sessions.contains { $0.state == .attention } }
+    /// What the dot beside the notch shows: attention wins over working; nil when every session is idle.
+    var activeState: State? {
+        sessions.contains { $0.state == .attention } ? .attention : sessions.contains { $0.state == .working } ? .working : nil
+    }
 
     // MARK: the secret
 
@@ -203,6 +206,20 @@ final class Agents {
         }
     }
 
+    /// Rewrites the settings file itself (same file, same permissions) instead of swapping in a new one:
+    /// Claude Code sessions that are already open watch the file and miss a swapped-in replacement.
+    /// shortcut: a crash mid-write could leave the file half-written; the backup made just before covers that.
+    static func writeInPlace(_ data: Data, to url: URL, mode: Int) throws {
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        let fd = open(url.path, exists ? (O_WRONLY | O_TRUNC) : (O_WRONLY | O_CREAT | O_EXCL), mode_t(mode))
+        guard fd >= 0 else { throw InstallError.unwritable }
+        let h = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        try h.write(contentsOf: data)
+        try h.synchronize()
+        try h.close()
+        if !exists { guard fchmodIfNeeded(url, mode) else { throw InstallError.unwritable } }
+    }
+
     /// open() trims the mode by the umask; set it exactly so a 0640 original stays 0640.
     private static func fchmodIfNeeded(_ url: URL, _ mode: Int) -> Bool { chmod(url.path, mode_t(mode)) == 0 }
 
@@ -240,7 +257,7 @@ final class Agents {
         }
         root["hooks"] = hooks
         let out = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .withoutEscapingSlashes])
-        try writeKeepingPrivate(out, to: settings, mode: mode)
+        try writeInPlace(out, to: settings, mode: mode)
         return backup
     }
 

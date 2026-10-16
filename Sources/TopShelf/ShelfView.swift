@@ -44,16 +44,15 @@ struct ShelfView: View {
 
     /// The strip level with the notch: activity banners while closed, a close target while open.
     private var notchRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             if !model.isOpen && model.hasBanners {
-                leftBanner.frame(width: ShelfModel.bannerWidth - 10, alignment: .leading)
-                Spacer(minLength: 0)
-                rightBanner.frame(width: ShelfModel.bannerWidth - 10, alignment: .trailing)
+                leftBanner.frame(width: ShelfModel.sideWidth)
+                Spacer(minLength: 0)   // the camera notch itself; nothing can be seen there
+                rightBanner.frame(width: ShelfModel.sideWidth)
             } else {
                 Spacer()
             }
         }
-        .padding(.horizontal, 10)
         .frame(height: model.geometry.notchHeight)
         .contentShape(Rectangle())
         .onTapGesture { model.isOpen ? model.close() : model.open(.tray) }
@@ -61,8 +60,8 @@ struct ShelfView: View {
 
     @ViewBuilder private var leftBanner: some View {
         if model.music.isPlaying && model.music.hasTrack {
-            HStack(spacing: 6) {
-                Artwork(image: model.music.artwork, size: 20)
+            HStack(spacing: 4) {
+                Artwork(image: model.music.artwork, size: 18)
                 PlayingBars(animate: !reduceMotion)
             }
             .accessibilityElement(children: .ignore)
@@ -70,18 +69,14 @@ struct ShelfView: View {
         }
     }
 
+    /// The Claude Code dot: orange when a session needs John, green while one is working.
     @ViewBuilder private var rightBanner: some View {
-        HStack(spacing: 6) {
-            if let e = model.calendar.soon {
-                Text(e.title).lineLimit(1)
-                Text(e.start.formatted(.dateTime.hour(.defaultDigits(amPM: .omitted)).minute())).fixedSize()
-            }
-            if model.agents.needsAttention {
-                Circle().fill(Look.orange).frame(width: 8, height: 8).accessibilityLabel("A Claude Code session needs you")
-            }
+        if let state = model.agents.activeState {
+            Circle().fill(state == .attention ? Look.orange : Look.green).frame(width: 10, height: 10)
+                .accessibilityLabel(state == .attention ? "A Claude Code session needs you" : "Claude Code is working")
         }
-        .font(Look.small)
     }
+
 
     @ViewBuilder private var page: some View {
         switch model.page {

@@ -45,6 +45,13 @@ enum SelfTest {
         m.open(.tray, byHover: true); m.toggle(.files)
         check("toggling another page switches to it", m.isOpen && m.page == .files && !m.openedByHover)
         check("open size matches the mockup (680 x 236 with a 32 pt notch)", m.openSize == CGSize(width: 680, height: 236))
+        check("closed with nothing going on: exactly the notch", m.collapsedSize.width == m.geometry.notchWidth)
+        func agentPost(_ json: String) { _ = SelfTest.post(m.agents, json) }
+        agentPost(#"{"session_id":"w","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#)
+        check("dot: a working session shows green, with no music or meeting", m.hasBanners && m.agents.activeState == .working)
+        check("closed with the dot: only 36 pt wider on each side", m.collapsedSize.width == m.geometry.notchWidth + 72)
+        agentPost(#"{"session_id":"n","hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/x/q"}"#)
+        check("dot: attention wins over working", m.agents.activeState == .attention)
         m.hoverDelay = 0.8
         check("hover delay is remembered", UserDefaults.standard.double(forKey: "hoverDelay") == 0.8)
     }
@@ -78,11 +85,6 @@ extension SelfTest {
         check("calendar: in 1 minute (rounded up, singular)", CalendarService.when(ev("x", 0.5, 30), now: now) == "in 1 minute")
         check("calendar: an hour or more away shows the time", CalendarService.when(ev("x", 90, 120), now: now).hasPrefix("at "))
         check("calendar: under way says now", CalendarService.when(ev("x", -5, 25), now: now).hasPrefix("now, until"))
-        let c = CalendarService(live: false)
-        c.now = now; c.next = ev("Soon", 11, 41)
-        check("calendar: an event within the hour shows beside the notch", c.soon != nil)
-        c.next = ev("Later", 90, 120)
-        check("calendar: a later event does not", c.soon == nil)
 
         let w = WeatherService.parse(Data(#"{"current":{"time":"2026-10-16T15:00","temperature_2m":24.1,"weather_code":2}}"#.utf8))
         check("weather: reads Open-Meteo's answer", w?.0.value == 24.1 && w?.1 == 2)
@@ -200,13 +202,13 @@ extension SelfTest {
         _ = post(a, #"{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Edit","cwd":"/Users/x/sample-project"}"#)
         check("agents: tool use says what it is doing", a.sessions.first?.detail == "Claude Code, editing files")
         _ = post(a, #"{"session_id":"s1","hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash","cwd":"/Users/x/sample-project"}"#)
-        check("agents: a permission prompt needs attention", a.needsAttention && a.sessions.count == 1)
+        check("agents: a permission prompt needs attention", a.activeState == .attention && a.sessions.count == 1)
         _ = post(a, #"{"session_id":"s1","hook_event_name":"Notification","notification_type":"auth_success","cwd":"/x"}"#)
-        check("agents: unrelated notices change nothing", a.needsAttention)
+        check("agents: unrelated notices change nothing", a.activeState == .attention)
         _ = post(a, #"{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"/Users/x/sample-project"}"#)
-        check("agents: once approved it is working again", a.sessions.first?.state == .working && !a.needsAttention)
+        check("agents: once approved it is working again", a.sessions.first?.state == .working && a.activeState == .working)
         _ = post(a, #"{"session_id":"s1","hook_event_name":"Stop","cwd":"/Users/x/sample-project"}"#)
-        check("agents: stop means idle", a.sessions.first?.state == .idle)
+        check("agents: stop means idle, and no dot", a.sessions.first?.state == .idle && a.activeState == nil)
         _ = post(a, #"{"session_id":"s1","hook_event_name":"SessionEnd"}"#)
         check("agents: an ended session leaves the list", a.sessions.isEmpty)
         _ = post(a, #"{"session_id":"s2","hook_event_name":"Stop","cwd":"/x/y"}"#)
@@ -253,6 +255,14 @@ extension SelfTest {
             check("install: settings and backup keep the original permissions (\(String(mode, radix: 8)))",
                   perms(s) == mode && perms(b ?? nil) == mode)
         }
+        let s0 = d.appendingPathComponent("inplace/settings.json")
+        try? FileManager.default.createDirectory(at: s0.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: s0.path, contents: Data("{}".utf8), attributes: [.posixPermissions: 0o644])
+        func inode(_ u: URL) -> Int? { (try? FileManager.default.attributesOfItem(atPath: u.path)[.systemFileNumber]) as? Int }
+        let before = inode(s0)
+        _ = try? Agents.installHooks(settings: s0)
+        check("install: the settings file is rewritten in place (same file), so open sessions notice",
+              before != nil && inode(s0) == before && Agents.hooksInstalled(settings: s0) && perms(s0) == 0o644)
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: settings.deletingLastPathComponent().path)) ?? []
         check("install: no half-written files are left behind", !leftovers.contains { $0.hasPrefix(".settings.json.top-shelf-") })
     }

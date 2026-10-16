@@ -49,11 +49,6 @@ final class CalendarService {
         return "at " + e.start.formatted(date: .omitted, time: .shortened)
     }
 
-    /// Shown beside the notch: an event under way or starting within the hour.
-    var soon: Event? {
-        guard let e = next, e.start.timeIntervalSince(now) < 3600 else { return nil }
-        return e
-    }
 }
 
 /// Current weather where the Mac is, from Open-Meteo (free, no account), refreshed every 30 minutes.
