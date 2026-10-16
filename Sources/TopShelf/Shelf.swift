@@ -264,7 +264,8 @@ final class HoverLogic {
     func left() {
         armed = true
         openWork?.cancel(); openWork = nil
-        guard model.isOpen, model.openedByHover else { return }   // a click or shortcut opening stays until dismissed
+        // In Click mode every opening closes after the pointer leaves; otherwise a click or shortcut opening stays until dismissed.
+        guard model.isOpen, model.openedByHover || model.openMode == .click else { return }
         let work = DispatchWorkItem { [weak self] in self?.model.close() }
         closeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverCloseDelay, execute: work)

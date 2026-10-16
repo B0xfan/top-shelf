@@ -115,6 +115,18 @@ extension SelfTest {
         hover.moved(inNotch: true)
         wait(0.6) { m.isOpen }
         check("settings: in Click mode hovering never opens the shelf", !m.isOpen)
+        m.open(.tray)   // a click opening
+        hover.left()
+        wait(0.1) { !m.isOpen }
+        let clickClosedEarly = !m.isOpen
+        wait(1) { !m.isOpen }
+        check("settings: in Click mode it closes after the 0.3 s close delay once the pointer leaves", !clickClosedEarly && !m.isOpen)
+        m.openMode = .both
+        m.open(.tray)
+        hover.left()
+        wait(0.6) { !m.isOpen }
+        check("settings: in Both mode a click opening stays after the pointer leaves", m.isOpen)
+        m.close(); hover.moved(inNotch: false)   // pointer away, ready to hover again
         m.openMode = .both
         hover.moved(inNotch: true)
         wait(0.05) { m.isOpen }

@@ -13,6 +13,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 delay("Hover open delay", "Pointer waits on the notch before it opens", $model.hoverDelay, upTo: 1.5)
+                    .disabled(model.openMode == .click)   // hover never opens it in Click mode
                 delay("Hover close delay", "Time after the pointer leaves before it closes", $model.hoverCloseDelay, upTo: 3)
             }
             Section("Menu bar") {
@@ -47,7 +48,6 @@ struct SettingsView: View {
             Text(title)
             Text(hint)
         }
-        .disabled(model.openMode == .click)   // hover is off in Click mode
     }
 
     private func keycap(_ keys: String) -> some View {
