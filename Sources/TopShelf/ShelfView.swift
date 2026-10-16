@@ -124,7 +124,8 @@ struct ShelfView: View {
     }
 
     private var search: some View {
-        TextField("Search clipboard", text: $model.clipboard.query)
+        @Bindable var history = model.clipboard
+        return TextField("Search clipboard", text: $history.query)
             .textFieldStyle(.plain).font(.system(size: 12))
             .padding(.horizontal, 10).frame(height: 30)
             .background(Look.button, in: Capsule())
