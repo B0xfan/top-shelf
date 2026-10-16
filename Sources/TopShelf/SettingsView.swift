@@ -19,6 +19,9 @@ struct SettingsView: View {
             Section("Menu bar") {
                 Toggle("Show menu bar icon", isOn: $model.showMenuBarIcon)
                     .toggleStyle(.switch)
+                LabeledContent("Quit Top Shelf") {   // the only way to quit when the menu bar icon is hidden
+                    Button("Quit") { NSApp.terminate(nil) }
+                }
             }
             Section("Keeping things") {
                 Picker("Keep dropped files for", selection: $model.keepFilesFor) {

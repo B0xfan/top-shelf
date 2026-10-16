@@ -27,6 +27,8 @@ final class Agents {
     private let dir: URL?
     private var listener: NWListener?
     private var timer: Timer?
+    /// Subagents that just stopped: a late hook post from one must not bring it back (hooks are separate processes).
+    private var stopped: [String: Date] = [:]
 
     init(dir: URL?, live: Bool) {
         self.dir = dir
@@ -142,9 +144,13 @@ final class Agents {
         let kind = (json["agent_type"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent"
         switch event {
         case "SessionEnd": sessions.removeAll { $0.id == id || $0.parent == id }; return
-        case "SubagentStop": if let agent { sessions.removeAll { $0.id == agent } }; return
+        case "SubagentStop":
+            if let agent { sessions.removeAll { $0.id == agent }; stopped[agent] = now }
+            stopped = stopped.filter { now.timeIntervalSince($0.value) < 60 }
+            return
         default: break
         }
+        if let agent, stopped[agent] != nil { return }
         let update: (State, String)?
         switch event {
         case "UserPromptSubmit", "SubagentStart": update = (.working, "working")

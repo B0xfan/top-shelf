@@ -271,7 +271,7 @@ final class HoverLogic {
         DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverCloseDelay, execute: work)
     }
 
-    func closed() { armed = false }
+    func closed() { armed = false; closeWork?.cancel(); closeWork = nil }   // a pending close must not shut the next opening
 }
 
 /// Runs `onChange` every time something read in `read` changes.

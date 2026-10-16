@@ -127,6 +127,12 @@ extension SelfTest {
         wait(0.6) { !m.isOpen }
         check("settings: in Both mode a click opening stays after the pointer leaves", m.isOpen)
         m.close(); hover.moved(inNotch: false)   // pointer away, ready to hover again
+        m.openMode = .click
+        m.open(.tray); hover.left(); m.close(); hover.closed()   // closed by hand while a close was pending
+        m.open(.tray)
+        wait(0.6) { !m.isOpen }
+        check("settings: a close pending from before does not shut the next opening", m.isOpen)
+        m.close(); hover.closed(); hover.moved(inNotch: false); m.openMode = .both
         m.openMode = .both
         hover.moved(inNotch: true)
         wait(0.05) { m.isOpen }
@@ -298,6 +304,8 @@ extension SelfTest {
               && a.sessions.first { $0.id == "m" }?.state == .idle)
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"a1","agent_type":"Explore"}"#)
         check("subagents: a finished one leaves", a.activeCount == 1 && !a.sessions.contains { $0.id == "a1" })
+        _ = post(a, #"{"session_id":"m","hook_event_name":"PostToolUse","agent_id":"a1","agent_type":"Explore","tool_name":"Grep","cwd":"/x/main-project"}"#)
+        check("subagents: a late report from a finished one does not bring it back", a.activeCount == 1 && !a.sessions.contains { $0.id == "a1" })
         _ = post(a, #"{"session_id":"m","hook_event_name":"SubagentStop","agent_id":"","agent_type":""}"#)
         check("subagents: Claude's own helpers stopping change nothing", a.activeCount == 1)
         _ = post(a, #"{"session_id":"z","hook_event_name":"SubagentStart","agent_id":"z1","agent_type":"Plan","cwd":"/x/other"}"#)
