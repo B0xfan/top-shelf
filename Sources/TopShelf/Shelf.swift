@@ -42,7 +42,7 @@ final class ShelfModel {
     static let openWidth: CGFloat = 680
     static let bodyHeight: CGFloat = 204   // page area plus page dots, as in the mockup (236 total with a 32 pt notch)
     /// Each side of the closed notch holds only a small picture or dot, so it stays just wider than the notch (mockup).
-    static let sideWidth: CGFloat = 36
+    static let sideWidth: CGFloat = 42
     var collapsedSize: CGSize {
         CGSize(width: geometry.notchWidth + (hasBanners ? 2 * Self.sideWidth : 0), height: geometry.notchHeight)
     }
