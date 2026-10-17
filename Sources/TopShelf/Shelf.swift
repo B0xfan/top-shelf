@@ -158,6 +158,7 @@ final class ShelfController {
     private var screen: NSScreen?
     private var monitors: [Any] = []
     private lazy var hover = HoverLogic(model: model)
+    private var wasOpen = false   // layout() also runs for banner changes; only a real close may disarm hover
 
     init(model: ShelfModel) {
         self.model = model
@@ -214,10 +215,12 @@ final class ShelfController {
             NSRect(x: s.frame.midX - size.width / 2, y: s.frame.maxY - size.height, width: size.width, height: size.height)
         }
         if model.isOpen {
+            wasOpen = true
             panel.setFrame(frame(model.openSize), display: true)
             if model.page == .clipboard && !model.openedByHover { panel.makeKey() }   // search takes typing right away
         } else {
-            hover.closed(pointerInNotch: notchRect.insetBy(dx: -1, dy: -1).contains(NSEvent.mouseLocation))
+            if wasOpen { hover.closed(pointerInNotch: notchRect.insetBy(dx: -1, dy: -1).contains(NSEvent.mouseLocation)) }
+            wasOpen = false
             if panel.isKeyWindow { panel.orderOut(nil) }   // hand typing back to the app John was in
             // shrink the window after the closing animation, unless it was reopened meanwhile
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
