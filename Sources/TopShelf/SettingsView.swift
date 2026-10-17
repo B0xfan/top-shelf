@@ -102,7 +102,7 @@ struct WeatherSettings: View {
                 LabeledContent("Place") {
                     Text(weather.chosen?.label ?? "None chosen yet").foregroundStyle(weather.chosen == nil ? .secondary : .primary)
                 }
-                TextField("Search for a city", text: $query).textFieldStyle(.roundedBorder).labelsHidden()
+                TextField("Search for a city", text: $query, prompt: Text("Search for a city")).textFieldStyle(.roundedBorder).labelsHidden()
                 if searchFailed {
                     Text("Can't search right now. Check the internet connection.").font(.callout).foregroundStyle(.secondary)
                 } else if let results, results.isEmpty {
