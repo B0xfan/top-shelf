@@ -173,6 +173,19 @@ extension SelfTest {
         check("sounds: if the chat stays quiet after its last helper, it plays anyway (once)", heardNow() == [.finished])
         Agents.finishFallbackDelay = 30
 
+        // One-off background runs (claude -p, scripts, tests) are not John's chats
+        func sendAs(_ entry: String, _ json: String, at seconds: Double) {
+            let body = Data(json.utf8)
+            let raw = "POST /event HTTP/1.1\r\nX-Top-Shelf-Token: \(a.token)\r\nX-Claude-Entrypoint: \(entry)\r\nContent-Length: \(body.count)\r\n\r\n"
+            if case .complete(let req) = Agents.parse(Data(raw.utf8) + body) { _ = a.handle(req, now: t0.addingTimeInterval(seconds)) }
+        }
+        sendAs("sdk-cli", #"{"session_id":"bg","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#, at: 300)
+        sendAs("sdk-cli", #"{"session_id":"bg","hook_event_name":"PermissionRequest","tool_name":"Write","cwd":"/x/p"}"#, at: 301)
+        sendAs("sdk-cli", #"{"session_id":"bg","hook_event_name":"Stop","cwd":"/x/p","background_tasks":[]}"#, at: 302)
+        check("sounds: one-off background runs make no sound", heardNow().isEmpty)
+        sendAs("cli", #"{"session_id":"chat","hook_event_name":"Stop","cwd":"/x/p","background_tasks":[]}"#, at: 303)
+        check("sounds: a chat window still does", heardNow() == [.finished])
+
         // The list and the saved choices
         let own = d.appendingPathComponent("Sounds")
         try? FileManager.default.createDirectory(at: own, withIntermediateDirectories: true)
@@ -465,6 +478,18 @@ extension SelfTest {
         _ = try? Agents.installHooks(settings: s0)
         check("install: the settings file is rewritten in place (same file), so open sessions notice",
               before != nil && inode(s0) == before && Agents.hooksInstalled(settings: s0) && perms(s0) == 0o644)
+        let old = d.appendingPathComponent("old/settings.json")
+        try? FileManager.default.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let oldCommand = "curl -s -m 2 -o /dev/null -H @x http://127.0.0.1:7823/event || true"
+        try! JSONSerialization.data(withJSONObject: ["hooks": ["Stop": [["hooks": [["type": "command", "command": oldCommand]]]],
+                                                              "PreToolUse": [["matcher": "Bash", "hooks": [["type": "command", "command": "my-own-check"]]]]]]).write(to: old)
+        check("install: an older install shows as needing the update", !Agents.hooksInstalled(settings: old))
+        _ = try? Agents.installHooks(settings: old)
+        let up = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: old))) as? [String: Any])?["hooks"] as? [String: Any]
+        let stops = (up?["Stop"] as? [[String: Any]])?.flatMap { $0["hooks"] as? [[String: Any]] ?? [] } ?? []
+        check("install: an older install is updated in place, not added twice, and John's own hooks stay",
+              stops.count == 1 && stops.first?["command"] as? String == Agents.hookCommand && Agents.hooksInstalled(settings: old)
+              && (up?["PreToolUse"] as? [[String: Any]])?.contains { $0["matcher"] as? String == "Bash" } == true)
         let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: settings.deletingLastPathComponent().path)) ?? []
         check("install: no half-written files are left behind", !leftovers.contains { $0.hasPrefix(".settings.json.top-shelf-") })
     }

@@ -145,19 +145,19 @@ final class Agents {
         guard let json = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
               let id = json["session_id"] as? String, let event = json["hook_event_name"] as? String else { return 400 }
         lastSignal = now
-        apply(id: id, event: event, json: json, now: now)
+        apply(id: id, event: event, json: json, now: now, oneOff: r.headers["x-claude-entrypoint"]?.hasPrefix("sdk") == true)
         return 200
     }
 
     /// Main sessions and their subagents. Events from inside a subagent carry its `agent_id`; the subagent gets its own
     /// row under its session. A session counts as busy only for its own work: handing a job to a subagent leaves it
     /// waiting (not counted) until it does something itself again, so one subagent at work reads 1, not 2.
-    private func apply(id: String, event: String, json: [String: Any], now: Date) {
+    private func apply(id: String, event: String, json: [String: Any], now: Date, oneOff: Bool = false) {
         // Helper sessions run by plugins (the remember plugin's summarizer) work in the system temporary folder; not John's chats.
         if let cwd = json["cwd"] as? String, Self.isHelperFolder(cwd) { return }
         let agent = (json["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let kind = (json["agent_type"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent"
-        if agent == nil { sounds(id: id, event: event, json: json, now: now) }
+        if agent == nil && !oneOff { sounds(id: id, event: event, json: json, now: now) }   // John's chats only, not background runs
         switch event {
         case "SessionEnd":
             sessions.removeAll { $0.id == id || $0.parent == id }
@@ -297,16 +297,17 @@ final class Agents {
     // MARK: one-click hook install
 
     /// The command every hook runs: post the event in the background, never slow Claude down, never fail it.
-    static let hookCommand = #"curl -s -m 2 -o /dev/null -H @"$HOME/Library/Application Support/Top Shelf/agent-header" -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:7823/event || true"#
+    /// It also passes how Claude was started: "cli" for a chat window, "sdk-…" for one-off background runs (claude -p, tools, tests).
+    static let hookCommand = #"curl -s -m 2 -o /dev/null -H @"$HOME/Library/Application Support/Top Shelf/agent-header" -H "X-Claude-Entrypoint: ${CLAUDE_CODE_ENTRYPOINT:-}" -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:7823/event || true"#
     static let marker = "127.0.0.1:7823/event"
 
     /// True only when every event Top Shelf listens to is connected (an older install lacks the subagent events).
     static func hooksInstalled(settings: URL) -> Bool {
         guard let data = try? Data(contentsOf: settings),
               let hooks = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["hooks"] as? [String: Any] else { return false }
-        return events.allSatisfy { e in
+        return events.allSatisfy { e in   // the current command, so an older install is offered the update
             (hooks[e] as? [[String: Any]] ?? []).contains { g in
-                (g["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) == true }
+                (g["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String) == hookCommand }
             }
         }
     }
@@ -375,6 +376,16 @@ final class Agents {
         var hooks = root["hooks"] as? [String: Any] ?? [:]
         for event in events {
             var groups = hooks[event] as? [[String: Any]] ?? []
+            // an older Top Shelf hook is brought up to date in place, never added twice
+            groups = groups.map { g in
+                var g = g
+                g["hooks"] = (g["hooks"] as? [[String: Any]] ?? []).map { h in
+                    var h = h
+                    if (h["command"] as? String)?.contains(marker) == true { h["command"] = hookCommand }
+                    return h
+                }
+                return g
+            }
             let present = groups.contains { g in
                 (g["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) == true }
             }
