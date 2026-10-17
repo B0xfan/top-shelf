@@ -107,18 +107,23 @@ final class WeatherService: NSObject, CLLocationManagerDelegate {
             Task { await fetch(p.latitude, p.longitude) }
         } else if manager.authorizationStatus == .authorized || manager.authorizationStatus == .authorizedAlways {
             manager.requestLocation()
+        } else if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()   // asked only once he uses current location
         }
     }
 
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
         switch m.authorizationStatus {
-        case .notDetermined: locationOff = false; m.requestWhenInUseAuthorization()
+        case .notDetermined: locationOff = false; if source == .current { m.requestWhenInUseAuthorization() }
         case .authorized, .authorizedAlways: locationOff = false; if source == .current { m.requestLocation() }
         default: locationOff = true
         }
     }
 
-    func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {}
+    /// A failed lookup (location not known yet) tries again in two minutes rather than waiting for the half-hour refresh.
+    func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in if self?.source == .current { self?.refresh() } }
+    }
 
     func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
@@ -143,7 +148,8 @@ final class WeatherService: NSObject, CLLocationManagerDelegate {
         let answer = try? await URLSession.shared.data(from: url)
         await MainActor.run {
             guard let t = target, t.latitude == latitude, t.longitude == longitude else { return }   // the spot changed meanwhile
-            guard let answer, (answer.1 as? HTTPURLResponse)?.statusCode == 200, let now = Self.parse(answer.0) else { offline = true; return }
+            offline = answer == nil   // only a failed connection is "no internet"; a bad reply just waits for the next refresh
+            guard let answer, (answer.1 as? HTTPURLResponse)?.statusCode == 200, let now = Self.parse(answer.0) else { return }
             temperature = now.0; code = now.1; offline = false
         }
     }

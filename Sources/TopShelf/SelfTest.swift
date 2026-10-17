@@ -427,10 +427,11 @@ enum Shots {
                  to: dir.appendingPathComponent("\(name).png"))
         }
         shot(SettingsView(model: model), size: CGSize(width: 560, height: 760), to: dir.appendingPathComponent("settings.png"))
+        let savedWeather = ["weatherSource", "weatherPlace"].map { ($0, UserDefaults.standard.object(forKey: $0)) }   // put back afterwards
         model.weather.source = .place
         model.weather.chosen = .init(name: "Tamarindo", region: "Guanacaste Province", country: "Costa Rica", latitude: 10.29913, longitude: -85.84107)
         shot(SettingsView(model: model), size: CGSize(width: 560, height: 860), to: dir.appendingPathComponent("settings-place.png"))
-        for k in ["weatherSource", "weatherPlace"] { UserDefaults.standard.removeObject(forKey: k) }
+        for (k, v) in savedWeather { UserDefaults.standard.set(v, forKey: k) }
         // closed with only music playing
         _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SessionEnd"}"#)
         _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"SessionEnd"}"#)
