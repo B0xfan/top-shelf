@@ -236,11 +236,11 @@ extension SelfTest {
         check("settings: in Both mode a click opening stays after the pointer leaves", m.isOpen)
         m.close(); hover.moved(inNotch: false)   // pointer away, ready to hover again
         m.openMode = .click
-        m.open(.tray); hover.left(); m.close(); hover.closed()   // closed by hand while a close was pending
+        m.open(.tray); hover.left(); m.close(); hover.closed(pointerInNotch: false)   // closed by hand while a close was pending
         m.open(.tray)
         wait(0.6) { !m.isOpen }
         check("settings: a close pending from before does not shut the next opening", m.isOpen)
-        m.close(); hover.closed(); m.openMode = .both; hover.moved(inNotch: false)   // re-arm in a mode where hover counts
+        m.close(); hover.closed(pointerInNotch: false); m.openMode = .both; hover.moved(inNotch: false)   // re-arm in a mode where hover counts
         hover.moved(inNotch: true)
         wait(0.05) { m.isOpen }
         let openedEarly = m.isOpen
@@ -251,10 +251,25 @@ extension SelfTest {
         let closedEarly = !m.isOpen
         wait(1) { !m.isOpen }
         check("settings: the 0.3 s close delay is honoured (open at 0.1 s, closed after)", !closedEarly && !m.isOpen)
-        m.open(.tray); m.close(); hover.closed()   // closed by a click while the pointer stays on the notch (what the window reports)
+        m.open(.tray); m.close(); hover.closed(pointerInNotch: true)   // closed by a click while the pointer stays on the notch
         hover.moved(inNotch: true)
         wait(0.5) { m.isOpen }
         check("settings: closing with the pointer still on the notch does not reopen it", !m.isOpen)
+        // John's report: after the shelf closes because the pointer left, hovering again must open it (no move away from the notch is seen)
+        hover.left()   // the pointer leaves, re-arming for the setup below
+        hover.moved(inNotch: true)
+        wait(1) { m.isOpen }
+        hover.left()
+        wait(1.5) { !m.isOpen }
+        m.close(); hover.closed(pointerInNotch: false)   // what the window reports when the hover close fires with the pointer away
+        hover.moved(inNotch: true)   // straight back onto the notch
+        wait(1) { m.isOpen }
+        check("hover: after closing because the pointer left, hovering the notch again opens it", m.isOpen && m.openedByHover)
+        m.close(); hover.closed(pointerInNotch: true)
+        hover.moved(inNotch: true)
+        wait(0.6) { m.isOpen }
+        check("hover: closing with the pointer on the notch still waits for it to leave", !m.isOpen)
+        hover.left()
 
         let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
         let f = d.appendingPathComponent("kept.txt")

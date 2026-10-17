@@ -217,7 +217,7 @@ final class ShelfController {
             panel.setFrame(frame(model.openSize), display: true)
             if model.page == .clipboard && !model.openedByHover { panel.makeKey() }   // search takes typing right away
         } else {
-            hover.closed()
+            hover.closed(pointerInNotch: notchRect.insetBy(dx: -1, dy: -1).contains(NSEvent.mouseLocation))
             if panel.isKeyWindow { panel.orderOut(nil) }   // hand typing back to the app John was in
             // shrink the window after the closing animation, unless it was reopened meanwhile
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -264,7 +264,7 @@ final class HoverLogic {
     private let model: ShelfModel
     private var openWork: DispatchWorkItem?
     private var closeWork: DispatchWorkItem?
-    /// False after a close until the pointer leaves the notch, so closing with the pointer on the notch does not reopen it.
+    /// False after a close made with the pointer on the notch, until it leaves, so that close does not reopen it at once.
     private var armed = true
 
     init(model: ShelfModel) { self.model = model }
@@ -292,7 +292,12 @@ final class HoverLogic {
         DispatchQueue.main.asyncAfter(deadline: .now() + model.hoverCloseDelay, execute: work)
     }
 
-    func closed() { armed = false; closeWork?.cancel(); closeWork = nil }   // a pending close must not shut the next opening
+    /// Only a close with the pointer on the notch disarms hover: after a close from leaving, the pointer is already away and the
+    /// window hears no more moves until it comes back, so disarming then would ignore the next hover (the bug John saw).
+    func closed(pointerInNotch: Bool) {
+        armed = !pointerInNotch
+        closeWork?.cancel(); closeWork = nil   // a pending close must not shut the next opening
+    }
 }
 
 /// Runs `onChange` every time something read in `read` changes.
