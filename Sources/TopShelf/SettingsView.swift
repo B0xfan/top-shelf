@@ -38,9 +38,9 @@ struct SettingsView: View {
                 LabeledContent("Open the clipboard") { keycap("⌥⌘V") }
             }
         }
-        .formStyle(.grouped)
+        .formStyle(.grouped)   // a grouped Form scrolls by itself when the window is shorter than its content
         .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 200)
     }
 
     private func delay(_ title: String, _ hint: String, _ value: Binding<Double>, upTo max: Double) -> some View {
@@ -67,17 +67,36 @@ enum SettingsWindow {
     private static var window: NSWindow?
 
     static func show(_ model: ShelfModel) {
-        if window == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
-            w.title = "Top Shelf Settings"
-            w.styleMask = [.titled, .closable]
-            w.isReleasedWhenClosed = false
-            w.center()
-            window = w
-        }
+        if window == nil { window = make(model) }
+        if let w = window, let visible = (NSScreen.main ?? w.screen)?.visibleFrame { fit(w, model: model, visible: visible) }
         model.close()
         NSApp.activate(ignoringOtherApps: true)   // Top Shelf has no Dock icon; bring the window forward
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    static func make(_ model: ShelfModel) -> NSWindow {
+        let host = NSHostingController(rootView: SettingsView(model: model))
+        host.sizingOptions = []   // the window keeps the size given below instead of growing to fit everything
+        let w = NSWindow(contentViewController: host)
+        w.title = "Top Shelf Settings"
+        w.styleMask = [.titled, .closable, .resizable]
+        w.isReleasedWhenClosed = false
+        return w
+    }
+
+    /// The window is as tall as its content, but never taller than the screen between the menu bar and the Dock
+    /// (`visible`); then the content scrolls. Width stays fixed.
+    static func fit(_ w: NSWindow, model: ShelfModel, visible: NSRect) {
+        let ideal = NSHostingView(rootView: SettingsView(model: model).fixedSize(horizontal: false, vertical: true)).fittingSize.height
+        let room = w.contentRect(forFrameRect: NSRect(origin: .zero, size: visible.size)).height
+        let height = min(ideal, room)
+        w.contentMinSize = NSSize(width: 520, height: min(200, room))
+        w.contentMaxSize = NSSize(width: 520, height: room)
+        w.setContentSize(NSSize(width: 520, height: height))
+        var f = w.frame   // centred, then kept inside the visible area
+        f.origin.x = visible.midX - f.width / 2
+        f.origin.y = min(max(visible.midY - f.height / 2, visible.minY), visible.maxY - f.height)
+        w.setFrame(f, display: false)
     }
 }
 

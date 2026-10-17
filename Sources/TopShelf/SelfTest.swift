@@ -27,7 +27,7 @@ enum SelfTest {
         return false
     }
 
-    static var tests: [() -> Void] = [soundTests, settingsTests, shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
+    static var tests: [() -> Void] = [soundTests, settingsTests, settingsWindowTests, shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
 
     static func shelfTests() {
         let g = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 37)
@@ -204,6 +204,27 @@ extension SelfTest {
         let m2 = ShelfModel()
         check("sounds: choices are kept after a relaunch, and off means silent", m2.soundFile(.question) == nil && m2.soundFile(.finished) == "Ping")
         for k in ["questionSoundOn", "questionSound", "finishedSoundOn", "finishedSound"] { UserDefaults.standard.removeObject(forKey: k) }
+    }
+
+    static func settingsWindowTests() {
+        let m = ShelfModel()
+        let w = SettingsWindow.make(m)
+        let short = NSRect(x: 0, y: 70, width: 1280, height: 560)   // a short screen: menu bar and Dock taken off
+        SettingsWindow.fit(w, model: m, visible: short)
+        let ideal = NSHostingView(rootView: SettingsView(model: m).fixedSize(horizontal: false, vertical: true)).fittingSize.height
+        check("settings window: on a short screen it fits inside the visible area (content \(Int(ideal)) pt tall, window \(Int(w.frame.height)) pt)",
+              ideal > short.height && short.contains(w.frame) && w.frame.height <= short.height)
+        let tall = NSRect(x: 0, y: 0, width: 1728, height: 1400)
+        SettingsWindow.fit(w, model: m, visible: tall)
+        check("settings window: on a tall screen it is just as tall as its content", abs(w.contentLayoutRect.height - ideal) < 2 && tall.contains(w.frame))
+        SettingsWindow.fit(w, model: m, visible: short)
+        let scrolls = w.contentView.map { v in
+            v.layoutSubtreeIfNeeded()
+            func find(_ v: NSView) -> NSScrollView? { (v as? NSScrollView) ?? v.subviews.lazy.compactMap(find).first }
+            return find(v).map { $0.documentView.map { $0.frame.height > $0.visibleRect.height + 1 } ?? false } ?? false
+        } ?? false
+        check("settings window: the content scrolls when it doesn't fit", scrolls)
+        w.close()
     }
 
     static func settingsTests() {
@@ -546,7 +567,8 @@ enum Shots {
             shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
                  to: dir.appendingPathComponent("\(name).png"))
         }
-        shot(SettingsView(model: model), size: CGSize(width: 560, height: 760), to: dir.appendingPathComponent("settings.png"))
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 1000), to: dir.appendingPathComponent("settings.png"))
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 480), to: dir.appendingPathComponent("settings-short.png"))
         let savedWeather = ["weatherSource", "weatherPlace"].map { ($0, UserDefaults.standard.object(forKey: $0)) }   // put back afterwards
         model.weather.source = .place
         model.weather.chosen = .init(name: "Tamarindo", region: "Guanacaste Province", country: "Costa Rica", latitude: 10.29913, longitude: -85.84107)
