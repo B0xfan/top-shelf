@@ -381,7 +381,8 @@ final class Agents {
                 var g = g
                 g["hooks"] = (g["hooks"] as? [[String: Any]] ?? []).map { h in
                     var h = h
-                    if (h["command"] as? String)?.contains(marker) == true { h["command"] = hookCommand }
+                    // only Top Shelf's own curl command, never a script of John's that posts to the same address
+                    if let c = h["command"] as? String, c.hasPrefix("curl "), c.contains(marker) { h["command"] = hookCommand }
                     return h
                 }
                 return g
