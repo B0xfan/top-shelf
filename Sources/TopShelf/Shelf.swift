@@ -28,6 +28,26 @@ final class ShelfModel {
         didSet { UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon"); menuBarIconChanged?() }
     }
     @ObservationIgnored var menuBarIconChanged: (() -> Void)?
+    /// Sounds for John's main chats (Settings > Sounds); the names are sound file names, as NSSound takes them.
+    var questionSoundOn: Bool = UserDefaults.standard.object(forKey: "questionSoundOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(questionSoundOn, forKey: "questionSoundOn") }
+    }
+    var questionSound: String = UserDefaults.standard.string(forKey: "questionSound") ?? "Glass" {
+        didSet { UserDefaults.standard.set(questionSound, forKey: "questionSound") }
+    }
+    var finishedSoundOn: Bool = UserDefaults.standard.object(forKey: "finishedSoundOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(finishedSoundOn, forKey: "finishedSoundOn") }
+    }
+    var finishedSound: String = UserDefaults.standard.string(forKey: "finishedSound") ?? "Hero" {
+        didSet { UserDefaults.standard.set(finishedSound, forKey: "finishedSound") }
+    }
+    /// The sound file to play for a signal, or nil when that sound is switched off.
+    func soundFile(_ s: Agents.Sound) -> String? {
+        switch s {
+        case .question: questionSoundOn ? questionSound : nil
+        case .finished: finishedSoundOn ? finishedSound : nil
+        }
+    }
     /// How long dropped files stay; 0 = until removed.
     var keepFilesFor: TimeInterval = UserDefaults.standard.object(forKey: "keepFilesFor") as? Double ?? 86400 {
         didSet { UserDefaults.standard.set(keepFilesFor, forKey: "keepFilesFor"); files.keepFor = keepFilesFor > 0 ? keepFilesFor : nil; files.prune() }
@@ -53,6 +73,7 @@ final class ShelfModel {
         files = FilesTray(store: dir?.appendingPathComponent("files.json"))
         clipboard = ClipboardHistory(dir: dir, live: live)
         agents = Agents(dir: dir, live: live)
+        if live { agents.onSound = { [weak self] s in self?.soundFile(s).map(AlertSounds.play) } }
         files.keepFor = keepFilesFor > 0 ? keepFilesFor : nil
         clipboard.keepFor = keepClipsFor
         files.prune(); clipboard.prune()

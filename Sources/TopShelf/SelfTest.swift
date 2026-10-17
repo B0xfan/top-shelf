@@ -27,7 +27,7 @@ enum SelfTest {
         return false
     }
 
-    static var tests: [() -> Void] = [settingsTests, shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
+    static var tests: [() -> Void] = [soundTests, settingsTests, shelfTests, musicTests, calendarWeatherTests, filesTests, clipboardTests, agentsTests, listenerTest]
 
     static func shelfTests() {
         let g = NotchGeometry(screenWidth: 1512, leftWidth: 662, rightWidth: 662, topInset: 32, menuBarHeight: 37)
@@ -116,6 +116,80 @@ extension SelfTest {
 }
 
 extension SelfTest {
+    static func soundTests() {
+        let d = tempDir(); defer { try? FileManager.default.removeItem(at: d) }
+        let a = Agents(dir: d, live: false)
+        var heard: [Agents.Sound] = []
+        a.onSound = { heard.append($0) }
+        let t0 = Date()
+        func send(_ json: String, at seconds: Double = 0) {
+            let body = Data(json.utf8)
+            let raw = "POST /event HTTP/1.1\r\nX-Top-Shelf-Token: \(a.token)\r\nContent-Length: \(body.count)\r\n\r\n"
+            if case .complete(let req) = Agents.parse(Data(raw.utf8) + body) { _ = a.handle(req, now: t0.addingTimeInterval(seconds)) }
+        }
+        func heardNow() -> [Agents.Sound] { defer { heard = [] }; return heard }
+
+        // Questions
+        send(#"{"session_id":"c","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#)
+        send(#"{"session_id":"c","hook_event_name":"PermissionRequest","tool_name":"Bash","cwd":"/x/p"}"#, at: 1)
+        check("sounds: a permission prompt plays the question sound at once", heardNow() == [.question])
+        send(#"{"session_id":"c","hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/x/p"}"#, at: 7)
+        check("sounds: the delayed 'needs you' notice for the same prompt plays nothing", heardNow().isEmpty)
+        send(#"{"session_id":"c","hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"/x/p"}"#, at: 8)
+        check("sounds: answering plays nothing", heardNow().isEmpty)
+        send(#"{"session_id":"c","hook_event_name":"PermissionRequest","tool_name":"Edit","cwd":"/x/p"}"#, at: 9)
+        check("sounds: a second question within a few seconds stays quiet", heardNow().isEmpty)
+        send(#"{"session_id":"c","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","cwd":"/x/p"}"#, at: 15)
+        check("sounds: Claude's multiple-choice question plays, once the gap has passed", heardNow() == [.question])
+        send(#"{"session_id":"e","hook_event_name":"PreToolUse","tool_name":"Bash","cwd":"/x/p"}"#)
+        send(#"{"session_id":"e","hook_event_name":"Notification","notification_type":"elicitation_dialog","cwd":"/x/p"}"#)
+        check("sounds: other tools are quiet; a connected tool's form plays", heardNow() == [.question])
+        send(#"{"session_id":"c","hook_event_name":"PermissionRequest","agent_id":"h1","agent_type":"Explore","tool_name":"Bash","cwd":"/x/p"}"#, at: 30)
+        check("sounds: a helper's question stays quiet", heardNow().isEmpty)
+
+        // Finished
+        send(#"{"session_id":"c","hook_event_name":"Stop","cwd":"/x/p"}"#, at: 31)
+        check("sounds: a main chat finishing plays the finished sound", heardNow() == [.finished])
+        send(#"{"session_id":"c","hook_event_name":"Stop","cwd":"/x/p"}"#, at: 32)
+        send(#"{"session_id":"c","hook_event_name":"Notification","notification_type":"idle_prompt","cwd":"/x/p"}"#, at: 90)
+        check("sounds: at most once per message, and the idle notice is quiet", heardNow().isEmpty)
+        send(#"{"session_id":"c","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#, at: 100)
+        send(#"{"session_id":"c","hook_event_name":"SubagentStart","agent_id":"h2","agent_type":"general-purpose","cwd":"/x/p"}"#, at: 101)
+        send(#"{"session_id":"c","hook_event_name":"Stop","cwd":"/x/p","background_tasks":[{"id":"t","type":"subagent","status":"running"}]}"#, at: 102)
+        send(#"{"session_id":"c","hook_event_name":"Stop","agent_id":"h2","cwd":"/x/p"}"#, at: 103)
+        send(#"{"session_id":"c","hook_event_name":"SubagentStop","agent_id":"h2","agent_type":"general-purpose","cwd":"/x/p"}"#, at: 104)
+        check("sounds: quiet while its helpers work, and helpers' own events are quiet", heardNow().isEmpty)
+        send(#"{"session_id":"c","hook_event_name":"PostToolUse","tool_name":"Read","cwd":"/x/p"}"#, at: 105)
+        send(#"{"session_id":"c","hook_event_name":"Stop","cwd":"/x/p","background_tasks":[]}"#, at: 106)
+        check("sounds: plays once when the chat's reply after its last helper is done", heardNow() == [.finished])
+        Agents.finishFallbackDelay = 0.2
+        send(#"{"session_id":"c","hook_event_name":"UserPromptSubmit","cwd":"/x/p"}"#, at: 200)
+        send(#"{"session_id":"c","hook_event_name":"SubagentStart","agent_id":"h3","agent_type":"Explore","cwd":"/x/p"}"#, at: 201)
+        send(#"{"session_id":"c","hook_event_name":"Stop","cwd":"/x/p"}"#, at: 202)
+        send(#"{"session_id":"c","hook_event_name":"SubagentStop","agent_id":"h3","agent_type":"Explore","cwd":"/x/p"}"#, at: 203)
+        wait(1) { !heard.isEmpty }
+        check("sounds: if the chat stays quiet after its last helper, it plays anyway (once)", heardNow() == [.finished])
+        Agents.finishFallbackDelay = 30
+
+        // The list and the saved choices
+        let own = d.appendingPathComponent("Sounds")
+        try? FileManager.default.createDirectory(at: own, withIntermediateDirectories: true)
+        try? Data("not a real sound".utf8).write(to: own.appendingPathComponent("Doorbell.aiff"))
+        try? FileManager.default.copyItem(at: AlertSounds.systemFolder.appendingPathComponent("Sosumi.aiff"),
+                                          to: own.appendingPathComponent("cmux-system-notification-sound-Sosumi.aiff"))
+        let list = AlertSounds.all(userFolder: own)
+        check("sound list: 14 built-in under their System Settings names plus Doorbell, the copy of Sosumi left out, in order",
+              list.count == 15 && list.map(\.name).prefix(5) == ["Boop", "Breeze", "Bubble", "Crystal", "Doorbell"]
+              && !list.contains { $0.name.hasPrefix("cmux") } && list.first { $0.name == "Crystal" }?.file == "Glass")
+        check("sound list: every built-in sound exists on this Mac", AlertSounds.builtIn.keys.allSatisfy { NSSound(named: NSSound.Name($0)) != nil })
+        let m = ShelfModel()
+        check("sounds: defaults are on, Crystal and Heroine", m.soundFile(.question) == "Glass" && m.soundFile(.finished) == "Hero")
+        m.questionSoundOn = false; m.finishedSound = "Ping"
+        let m2 = ShelfModel()
+        check("sounds: choices are kept after a relaunch, and off means silent", m2.soundFile(.question) == nil && m2.soundFile(.finished) == "Ping")
+        for k in ["questionSoundOn", "questionSound", "finishedSoundOn", "finishedSound"] { UserDefaults.standard.removeObject(forKey: k) }
+    }
+
     static func settingsTests() {
         let m = ShelfModel()
         check("settings: defaults are Both, 0.3 s, 0.5 s, 1 day, 1 week, menu bar icon on",
@@ -352,6 +426,9 @@ extension SelfTest {
         check("install: a backup of the old settings is made first", backup.flatMap { try? String(contentsOf: $0, encoding: .utf8) } == original)
         check("install: John's own settings and hooks are kept", after?["model"] as? String == "opus" && (hooks?["Stop"] as? [Any])?.count == 2)
         check("install: every event is connected, subagents included", Agents.events.allSatisfy { (hooks?[$0] as? [Any])?.isEmpty == false })
+        check("install: Claude's question tool is matched, permission requests are connected",
+              ((hooks?["PreToolUse"] as? [[String: Any]])?.first?["matcher"] as? String) == "AskUserQuestion"
+              && (hooks?["PermissionRequest"] as? [[String: Any]])?.first?["matcher"] == nil)
         check("install: shows as installed", Agents.hooksInstalled(settings: settings))
         check("install: the secret is not in Claude's settings", !((try? String(contentsOf: settings, encoding: .utf8)) ?? "").contains(a.token))
         Thread.sleep(forTimeInterval: 1.1)   // backups are named by the second

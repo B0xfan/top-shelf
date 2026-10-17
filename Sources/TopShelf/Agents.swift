@@ -19,7 +19,10 @@ final class Agents {
     }
 
     static let port: UInt16 = 7823
-    static let events = ["UserPromptSubmit", "PostToolUse", "Stop", "Notification", "SessionEnd", "SubagentStart", "SubagentStop"]
+    static let events = ["UserPromptSubmit", "PostToolUse", "Stop", "Notification", "SessionEnd", "SubagentStart", "SubagentStop",
+                         "PermissionRequest", "PreToolUse"]
+    /// Events that only need some tools: PreToolUse is wanted only for Claude's multiple-choice question (for its sound).
+    static let matchers = ["PreToolUse": "AskUserQuestion"]
     private(set) var sessions: [Session] = []
     private(set) var lastSignal: Date?
     private(set) var listenerProblem: String?
@@ -29,6 +32,18 @@ final class Agents {
     private var timer: Timer?
     /// Subagents that just stopped: a late hook post from one must not bring it back (hooks are separate processes).
     private var stopped: [String: Date] = [:]
+
+    // MARK: sounds (main chats only)
+    enum Sound { case question, finished }
+    /// Set by the app to play the chosen sound; the self-test records instead.
+    @ObservationIgnored var onSound: ((Sound) -> Void)?
+    @ObservationIgnored private var lastQuestion: [String: Date] = [:]
+    @ObservationIgnored private var finishedPlayed: Set<String> = []   // chats that already played "finished" since John's last message
+    @ObservationIgnored private var finishPending: Set<String> = []    // chats that finished while their helpers still work
+    @ObservationIgnored private var finishFallback: [String: DispatchWorkItem] = [:]
+    static let questionGap: TimeInterval = 5
+    /// After the last helper stops, the chat normally replies again (and that reply's finish plays); if it stays quiet this long, play anyway.
+    static var finishFallbackDelay: TimeInterval = 30
 
     init(dir: URL?, live: Bool) {
         self.dir = dir
@@ -142,11 +157,16 @@ final class Agents {
         if let cwd = json["cwd"] as? String, Self.isHelperFolder(cwd) { return }
         let agent = (json["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let kind = (json["agent_type"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent"
+        if agent == nil { sounds(id: id, event: event, json: json, now: now) }
         switch event {
-        case "SessionEnd": sessions.removeAll { $0.id == id || $0.parent == id }; return
+        case "SessionEnd":
+            sessions.removeAll { $0.id == id || $0.parent == id }
+            lastQuestion[id] = nil; finishedPlayed.remove(id); finishPending.remove(id); finishFallback.removeValue(forKey: id)?.cancel()
+            return
         case "SubagentStop":
             if let agent { sessions.removeAll { $0.id == agent }; stopped[agent] = now }
             stopped = stopped.filter { now.timeIntervalSince($0.value) < 60 }
+            if finishPending.contains(id), !sessions.contains(where: { $0.parent == id }) { scheduleFinishFallback(id) }
             return
         default: break
         }
@@ -178,6 +198,55 @@ final class Agents {
             upsert(Session(id: id, parent: nil, name: cwdName, state: .idle, detail: "Claude Code, waiting on a subagent", updated: now))
         }
         prune(now: now)
+    }
+
+    /// Question: the instant signals only (a permission prompt, Claude's multiple-choice question, a connected tool's form),
+    /// at most one per chat every few seconds. Finished: once per message John sends, held back while the chat's helpers work.
+    private func sounds(id: String, event: String, json: [String: Any], now: Date) {
+        if ["UserPromptSubmit", "PostToolUse", "PreToolUse", "PermissionRequest", "Stop"].contains(event) {
+            finishFallback.removeValue(forKey: id)?.cancel()   // the chat is working again; its own finish will play
+        }
+        switch event {
+        case "UserPromptSubmit":
+            finishedPlayed.remove(id); finishPending.remove(id)
+        case "PermissionRequest", "PreToolUse", "Notification":
+            let asks = event == "PermissionRequest"
+                || (event == "PreToolUse" && json["tool_name"] as? String == "AskUserQuestion")
+                || ["elicitation_dialog", "elicitation_url_dialog"].contains(json["notification_type"] as? String ?? "")
+            guard asks, lastQuestion[id].map({ now.timeIntervalSince($0) >= Self.questionGap }) ?? true else { return }
+            lastQuestion[id] = now
+            onSound?(.question)
+        case "Stop":
+            if helpersWorking(id: id, json: json) { finishPending.insert(id); return }
+            finishPending.remove(id)
+            playFinished(id)
+        default: break
+        }
+    }
+
+    private func playFinished(_ id: String) {
+        guard !finishedPlayed.contains(id) else { return }
+        finishedPlayed.insert(id)
+        onSound?(.finished)
+    }
+
+    /// Helpers still running: Claude's own list when the Stop carries it, otherwise the helper rows seen so far.
+    private func helpersWorking(id: String, json: [String: Any]) -> Bool {
+        if let tasks = json["background_tasks"] as? [[String: Any]] {
+            return tasks.contains { $0["type"] as? String == "subagent" && ["running", "pending"].contains($0["status"] as? String ?? "") }
+        }
+        return sessions.contains { $0.parent == id }
+    }
+
+    private func scheduleFinishFallback(_ id: String) {
+        finishFallback[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.finishPending.contains(id) else { return }
+            self.finishPending.remove(id); self.finishFallback[id] = nil
+            self.playFinished(id)
+        }
+        finishFallback[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.finishFallbackDelay, execute: work)
     }
 
     private func upsert(_ s: Session) {
@@ -307,7 +376,11 @@ final class Agents {
             let present = groups.contains { g in
                 (g["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) == true }
             }
-            if !present { groups.append(["hooks": [["type": "command", "command": hookCommand, "async": true, "timeout": 5]]]) }
+            if !present {
+                var g: [String: Any] = ["hooks": [["type": "command", "command": hookCommand, "async": true, "timeout": 5]]]
+                if let m = matchers[event] { g["matcher"] = m }
+                groups.append(g)
+            }
             hooks[event] = groups
         }
         root["hooks"] = hooks

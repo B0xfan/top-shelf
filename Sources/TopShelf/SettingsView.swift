@@ -24,6 +24,7 @@ struct SettingsView: View {
                 }
             }
             WeatherSettings(weather: model.weather)
+            SoundSettings(model: model)
             Section("Keeping things") {
                 Picker("Keep dropped files for", selection: $model.keepFilesFor) {
                     Text("1 hour").tag(3600.0); Text("1 day").tag(86400.0); Text("1 week").tag(604800.0); Text("Until removed").tag(0.0)
@@ -131,5 +132,40 @@ struct WeatherSettings: View {
             guard !Task.isCancelled else { return }
             results = found; searchFailed = found == nil
         }
+    }
+}
+
+/// Sounds for John's main chats, as in the approved settings mockup.
+struct SoundSettings: View {
+    @Bindable var model: ShelfModel
+    @State private var choices = AlertSounds.all()
+
+    var body: some View {
+        Section {
+            Toggle("When a chat has a question", isOn: $model.questionSoundOn).toggleStyle(.switch)
+            row($model.questionSound, on: model.questionSoundOn, label: "When a chat has a question")
+            Toggle("When a chat finishes", isOn: $model.finishedSoundOn).toggleStyle(.switch)
+            row($model.finishedSound, on: model.finishedSoundOn, label: "When a chat finishes")
+        } header: {
+            Text("Sounds")
+        } footer: {
+            Text("Only your main chats make sounds. Their helpers (subagents) stay quiet.").font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear { choices = AlertSounds.all() }   // picks up sounds added to ~/Library/Sounds since
+    }
+
+    private func row(_ file: Binding<String>, on: Bool, label: String) -> some View {
+        LabeledContent("Sound") {
+            HStack(spacing: 8) {
+                Picker("Sound", selection: file) {
+                    ForEach(choices, id: \.file) { Text($0.name).tag($0.file) }
+                }
+                .labelsHidden().fixedSize()
+                .accessibilityLabel("Sound: \(label)")
+                Button { AlertSounds.play(file.wrappedValue) } label: { Image(systemName: "play.fill") }
+                    .buttonStyle(.borderless).help("Play").accessibilityLabel("Play")
+            }
+        }
+        .disabled(!on)
     }
 }
