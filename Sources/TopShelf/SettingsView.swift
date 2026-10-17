@@ -68,7 +68,8 @@ enum SettingsWindow {
 
     static func show(_ model: ShelfModel) {
         if window == nil { window = make(model) }
-        if let w = window, let visible = (NSScreen.main ?? w.screen)?.visibleFrame { fit(w, model: model, visible: visible) }
+        // sized on opening only, so a window already open (or resized by John) stays as it is
+        if let w = window, !w.isVisible, let visible = (NSScreen.main ?? w.screen)?.visibleFrame { fit(w, model: model, visible: visible) }
         model.close()
         NSApp.activate(ignoringOtherApps: true)   // Top Shelf has no Dock icon; bring the window forward
         window?.makeKeyAndOrderFront(nil)
