@@ -93,6 +93,14 @@ struct CalendarCard: View {
     let calendar: CalendarService
     let weather: WeatherService
 
+    /// Why there is no weather, in plain words; nil while it is simply loading.
+    static func weatherNote(_ w: WeatherService) -> String? {
+        if w.source == .current && w.locationOff { return "Location is off. Choose a place in Settings." }
+        if w.source == .place && w.chosen == nil { return "Choose a place in Settings for the weather." }
+        if w.offline { return "No weather: no internet connection." }
+        return nil
+    }
+
     var body: some View {
         ZStack {
             Color.black
@@ -109,6 +117,8 @@ struct CalendarCard: View {
                     Text([t.formatted(.measurement(width: .narrow, usage: .weather, numberFormatStyle: .number.precision(.fractionLength(0)))),
                           WeatherService.describe(code), weather.place].compactMap { $0 }.joined(separator: "  "))
                         .font(.system(size: 11)).foregroundStyle(Look.dim).lineLimit(1).padding(.top, 4)
+                } else if let note = Self.weatherNote(weather) {
+                    Text(note).font(.system(size: 11)).foregroundStyle(Look.dim).lineLimit(1).padding(.top, 4)
                 }
             }
             .padding(.horizontal, 14)

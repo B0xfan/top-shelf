@@ -94,6 +94,24 @@ extension SelfTest {
         check("weather: reads Open-Meteo's answer", w?.0.value == 24.1 && w?.1 == 2)
         check("weather: a broken answer is ignored", WeatherService.parse(Data("{}".utf8)) == nil)
         check("weather: code 2 is partly cloudy, unknown codes say Weather", WeatherService.describe(2) == "Partly cloudy" && WeatherService.describe(1234) == "Weather")
+        let found = WeatherService.parsePlaces(Data(#"{"results":[{"name":"Tamarindo","admin1":"Guanacaste Province","country":"Costa Rica","latitude":10.29913,"longitude":-85.84107},{"name":"Nowhere","latitude":1,"longitude":2}],"generationtime_ms":0.5}"#.utf8))
+        check("weather search: reads city, region and country", found?.first?.label == "Tamarindo, Guanacaste Province, Costa Rica" && found?.last?.label == "Nowhere")
+        check("weather search: no results is an empty list, a broken answer is nil",
+              WeatherService.parsePlaces(Data(#"{"generationtime_ms":0.3}"#.utf8))?.isEmpty == true && WeatherService.parsePlaces(Data("oops".utf8)) == nil)
+        check("weather search: the name is sent safely", WeatherService.searchURL("San José & co")?.absoluteString.contains("name=San%20Jos%C3%A9%20%26%20co") == true)
+        let ws = WeatherService(live: false)
+        check("weather: current location is the default", ws.source == .current && ws.chosen == nil)
+        check("weather: with no place chosen it says to choose one", CalendarCard.weatherNote({ ws.source = .place; return ws }()) == "Choose a place in Settings for the weather.")
+        ws.chosen = found?.first
+        let again = WeatherService(live: false)
+        check("weather: the picked place is kept after a relaunch", again.source == .place && again.chosen?.name == "Tamarindo" && again.chosen?.country == "Costa Rica")
+        check("weather: it uses the picked place's coordinates", again.target.map { $0.latitude == 10.29913 && $0.longitude == -85.84107 } == true
+              && WeatherService.forecastURL(again.target!.latitude, again.target!.longitude)?.absoluteString.contains("latitude=10.299&longitude=-85.841") == true)
+        again.source = .current; again.locationOff = true
+        check("weather: location off says so and points to choosing a place", CalendarCard.weatherNote(again) == "Location is off. Choose a place in Settings.")
+        again.locationOff = false; again.offline = true
+        check("weather: no connection says so", CalendarCard.weatherNote(again) == "No weather: no internet connection.")
+        for k in ["weatherSource", "weatherPlace"] { UserDefaults.standard.removeObject(forKey: k) }
     }
 }
 
@@ -408,7 +426,11 @@ enum Shots {
             shot(ShelfView(model: model).transaction { $0.animation = nil }, size: CGSize(width: 760, height: 260),
                  to: dir.appendingPathComponent("\(name).png"))
         }
-        shot(SettingsView(model: model), size: CGSize(width: 560, height: 660), to: dir.appendingPathComponent("settings.png"))
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 760), to: dir.appendingPathComponent("settings.png"))
+        model.weather.source = .place
+        model.weather.chosen = .init(name: "Tamarindo", region: "Guanacaste Province", country: "Costa Rica", latitude: 10.29913, longitude: -85.84107)
+        shot(SettingsView(model: model), size: CGSize(width: 560, height: 860), to: dir.appendingPathComponent("settings-place.png"))
+        for k in ["weatherSource", "weatherPlace"] { UserDefaults.standard.removeObject(forKey: k) }
         // closed with only music playing
         _ = SelfTest.post(model.agents, #"{"session_id":"a","hook_event_name":"SessionEnd"}"#)
         _ = SelfTest.post(model.agents, #"{"session_id":"b","hook_event_name":"SessionEnd"}"#)

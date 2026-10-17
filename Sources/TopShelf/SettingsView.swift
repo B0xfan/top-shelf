@@ -23,6 +23,7 @@ struct SettingsView: View {
                     Button("Quit") { NSApp.terminate(nil) }
                 }
             }
+            WeatherSettings(weather: model.weather)
             Section("Keeping things") {
                 Picker("Keep dropped files for", selection: $model.keepFilesFor) {
                     Text("1 hour").tag(3600.0); Text("1 day").tag(86400.0); Text("1 week").tag(604800.0); Text("Until removed").tag(0.0)
@@ -76,5 +77,59 @@ enum SettingsWindow {
         model.close()
         NSApp.activate(ignoringOtherApps: true)   // Top Shelf has no Dock icon; bring the window forward
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+/// Weather for the current location or a picked place, as in the approved settings mockup.
+struct WeatherSettings: View {
+    @Bindable var weather: WeatherService
+    @State private var query = ""
+    @State private var results: [WeatherService.Place]?
+    @State private var searchFailed = false
+
+    var body: some View {
+        Section("Weather") {
+            Picker("Weather for", selection: $weather.source) {
+                Text("Use current location").tag(WeatherService.Source.current)
+                Text("Choose a place").tag(WeatherService.Source.place)
+            }
+            .pickerStyle(.segmented)
+            if weather.source == .current && weather.locationOff {
+                Text("Location access is off for Top Shelf, so it can't tell where you are. Choose a place instead, or allow Top Shelf in System Settings, Privacy & Security, Location Services.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if weather.source == .place {
+                LabeledContent("Place") {
+                    Text(weather.chosen?.label ?? "None chosen yet").foregroundStyle(weather.chosen == nil ? .secondary : .primary)
+                }
+                TextField("Search for a city", text: $query).textFieldStyle(.roundedBorder).labelsHidden()
+                if searchFailed {
+                    Text("Can't search right now. Check the internet connection.").font(.callout).foregroundStyle(.secondary)
+                } else if let results, results.isEmpty {
+                    Text("No places found").font(.callout).foregroundStyle(.secondary)
+                } else if let results {
+                    ForEach(results, id: \.self) { p in
+                        Button { weather.chosen = p; query = "" } label: {
+                            HStack(spacing: 6) {
+                                Text(p.name)
+                                Text([p.region, p.country].filter { !$0.isEmpty }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .task(id: query) {   // searches shortly after typing stops
+            let q = query.trimmingCharacters(in: .whitespaces)
+            guard q.count >= 2 else { results = nil; searchFailed = false; return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            let found = await WeatherService.search(q)
+            guard !Task.isCancelled else { return }
+            results = found; searchFailed = found == nil
+        }
     }
 }
