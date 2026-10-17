@@ -138,7 +138,7 @@ struct WeatherSettings: View {
 /// Sounds for John's main chats, as in the approved settings mockup.
 struct SoundSettings: View {
     @Bindable var model: ShelfModel
-    @State private var choices = AlertSounds.all()
+    @State private var choices: [AlertSounds.Choice] = []   // filled when Settings opens, not on every redraw
 
     var body: some View {
         Section {
@@ -159,6 +159,9 @@ struct SoundSettings: View {
             HStack(spacing: 8) {
                 Picker("Sound", selection: file) {
                     ForEach(choices, id: \.file) { Text($0.name).tag($0.file) }
+                    if !choices.isEmpty, !choices.contains(where: { $0.file == file.wrappedValue }) {
+                        Text("\(file.wrappedValue) (missing)").tag(file.wrappedValue)   // a saved sound that was deleted
+                    }
                 }
                 .labelsHidden().fixedSize()
                 .accessibilityLabel("Sound: \(label)")

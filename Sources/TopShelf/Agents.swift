@@ -233,7 +233,9 @@ final class Agents {
     /// Helpers still running: Claude's own list when the Stop carries it, otherwise the helper rows seen so far.
     private func helpersWorking(id: String, json: [String: Any]) -> Bool {
         if let tasks = json["background_tasks"] as? [[String: Any]] {
-            return tasks.contains { $0["type"] as? String == "subagent" && ["running", "pending"].contains($0["status"] as? String ?? "") }
+            // any helper not yet in a finished state (the docs don't list the status values)
+            let done: Set<String> = ["completed", "complete", "failed", "killed", "cancelled", "canceled", "stopped", "error"]
+            return tasks.contains { $0["type"] as? String == "subagent" && !done.contains(($0["status"] as? String ?? "").lowercased()) }
         }
         return sessions.contains { $0.parent == id }
     }

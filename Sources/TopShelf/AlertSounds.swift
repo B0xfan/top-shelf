@@ -17,12 +17,21 @@ enum AlertSounds {
     /// Built-in sounds plus the user's own, skipping exact copies of a built-in one, sorted by name.
     static func all(userFolder: URL = userFolder, systemFolder: URL = systemFolder) -> [Choice] {
         let fm = FileManager.default
-        let builtInData = Set(builtIn.keys.compactMap { try? Data(contentsOf: systemFolder.appendingPathComponent("\($0).aiff")) })
-        let own = ((try? fm.contentsOfDirectory(at: userFolder, includingPropertiesForKeys: nil)) ?? [])
-            .filter { kinds.contains($0.pathExtension.lowercased()) }
-            .filter { url in (try? Data(contentsOf: url)).map { !builtInData.contains($0) } ?? false }
-            .map { Choice(file: $0.deletingPathExtension().lastPathComponent, name: $0.deletingPathExtension().lastPathComponent) }
-            .filter { builtIn[$0.file] == nil }
+        func size(_ u: URL) -> Int { (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1 }
+        let systemFiles = builtIn.keys.map { systemFolder.appendingPathComponent("\($0).aiff") }
+        let sizes = Set(systemFiles.map(size))
+        // only files the same size as a built-in sound are read to compare
+        func isCopy(_ u: URL) -> Bool {
+            guard sizes.contains(size(u)), let d = try? Data(contentsOf: u) else { return false }
+            return systemFiles.contains { size($0) == d.count && (try? Data(contentsOf: $0)) == d }
+        }
+        var seen = Set(builtIn.keys)
+        let own = ((try? fm.contentsOfDirectory(at: userFolder, includingPropertiesForKeys: [.fileSizeKey])) ?? [])
+            .filter { kinds.contains($0.pathExtension.lowercased()) && !isCopy($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .filter { seen.insert($0).inserted }   // one entry per name
+            .map { Choice(file: $0, name: $0) }
         return (builtIn.map { Choice(file: $0.key, name: $0.value) } + own).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
